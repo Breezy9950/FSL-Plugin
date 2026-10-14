@@ -1,0 +1,21 @@
+{
+  "name": "FSL-Plugin",
+  "version": "1.0.0",
+  "description": "4KHDHub direct links with configurable source and sort preferences",
+  "scrapers": [
+    {
+      "id": "4khdhub",
+      "name": "4KHDHub",
+      "description": "4KHDHub direct links via search + HubCloud/Hblinks extraction, with preferred-source filtering and quality/size sorting",
+      "version": "1.0.0",
+      "author": "Breezy9950",
+      "filename": "providers/4khdhub.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true,
+      "hasSettings": true,
+      "formats": ["mkv"],
+      "logo": "https://www.google.com/s2/favicons?domain=4khdhub.click&sz=128",
+      "contentLanguage": ["en"]
+    }
+  ]
+}

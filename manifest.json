@@ -1,6 +1,6 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "4KHDHub, HDHub4u, and VidFast direct links",
   "scrapers": [
     {
@@ -26,7 +26,7 @@
       "filename": "providers/hdhub4u.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
-      "hasSettings": true,
+      "hasSettings": false,
       "formats": ["mkv", "mp4"],
       "logo": "https://www.google.com/s2/favicons?domain=hdhub4u.cl&sz=128",
       "contentLanguage": ["en"]

@@ -1,7 +1,7 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.0.6",
-  "description": "4KHDHub direct links with configurable source and sort preferences, plus VixSrc HLS",
+  "version": "1.0.7",
+  "description": "4KHDHub + HDHub4u + VidFast direct links",
   "scrapers": [
     {
       "id": "4khdhub",
@@ -18,18 +18,18 @@
       "contentLanguage": ["en"]
     },
     {
-  "id": "hdhub4u",
-  "name": "HDHub4u",
-  "description": "HDHub4u direct links via Typesense search + multi-hoster extraction",
-  "version": "1.0.0",
-  "author": "Breezy9950",
-  "filename": "providers/hdhub4u.js",
-  "supportedTypes": ["movie", "tv"],
-  "enabled": true,
-  "hasSettings": true,
-  "formats": ["mkv", "mp4"],
-  "logo": "https://www.google.com/s2/favicons?domain=hdhub4u.cl&sz=128",
-  "contentLanguage": ["en"]
+      "id": "hdhub4u",
+      "name": "HDHub4u",
+      "description": "HDHub4u direct links via Typesense search + multi-hoster extraction",
+      "version": "1.0.0",
+      "author": "Breezy9950",
+      "filename": "providers/hdhub4u.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true,
+      "hasSettings": true,
+      "formats": ["mkv", "mp4"],
+      "logo": "https://www.google.com/s2/favicons?domain=hdhub4u.cl&sz=128",
+      "contentLanguage": ["en"]
     },
     {
       "id": "maxstream-vidfast",

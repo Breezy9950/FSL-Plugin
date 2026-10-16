@@ -56,20 +56,21 @@ function decVidFast(encrypted) {
 }
 
 // ============================================================
-// SETTINGS — one toggle per quality tier
+// SETTINGS — clean labels, ordered from best to worst quality
 // ============================================================
 function onSettings() {
   return [
-    { type: "toggle", key: "auto",  name: "auto",  label: "Auto (master playlist — adaptive)", default: true },
-    { type: "toggle", key: "q4k",   name: "q4k",   label: "4K (1440p and above)",              default: false },
-    { type: "toggle", key: "q1080", name: "q1080", label: "1080p",                            default: true },
-    { type: "toggle", key: "q720",  name: "q720",  label: "720p",                             default: false },
-    { type: "toggle", key: "q480",  name: "q480",  label: "480p",                             default: false }
+    { type: "toggle", key: "auto",  name: "auto",  label: "Auto",  default: true  },
+    { type: "toggle", key: "q2160", name: "q2160", label: "2160p", default: false },
+    { type: "toggle", key: "q1440", name: "q1440", label: "1440p", default: false },
+    { type: "toggle", key: "q1080", name: "q1080", label: "1080p", default: true  },
+    { type: "toggle", key: "q720",  name: "q720",  label: "720p",  default: false },
+    { type: "toggle", key: "q480",  name: "q480",  label: "480p",  default: false }
   ];
 }
 
 function resolveSettings(input) {
-  const out = { auto: true, q4k: false, q1080: true, q720: false, q480: false };
+  const out = { auto: true, q2160: false, q1440: false, q1080: true, q720: false, q480: false };
   try {
     let s = input;
     if (!s && typeof globalThis !== "undefined") s = globalThis.SCRAPER_SETTINGS || globalThis.SETTINGS || globalThis.settings;
@@ -77,7 +78,7 @@ function resolveSettings(input) {
     if (!s && typeof window !== "undefined") s = window.SCRAPER_SETTINGS || window.SETTINGS || window.settings;
     if (!s) return out;
 
-    const keys = ["auto", "q4k", "q1080", "q720", "q480"];
+    const keys = ["auto", "q2160", "q1440", "q1080", "q720", "q480"];
     const present = keys.filter(function (k) { return s[k] !== undefined; });
     if (!present.length) return out;
 
@@ -88,7 +89,7 @@ function resolveSettings(input) {
       else if (v === false || v === "false" || v === "off" || v === "no" || v === 0 || v === "0") out[k] = false;
     });
 
-    if (!out.auto && !out.q4k && !out.q1080 && !out.q720 && !out.q480) out.auto = true;
+    if (!out.auto && !out.q2160 && !out.q1440 && !out.q1080 && !out.q720 && !out.q480) out.auto = true;
   } catch (e) { console.log("[VidFast] settings parse: " + e.message); }
   return out;
 }
@@ -146,16 +147,15 @@ function parseHlsVariants(masterUrl, text) {
   return variants;
 }
 
-function formatMbps(bps) {
-  if (!bps) return "";
-  return (bps / 1000000).toFixed(1) + " Mbps";
-}
-
+// Bucket a real playlist height into a toggle tier.
+// Real height is preserved for the label — boundaries only decide
+// which toggle controls it.
 function tierOf(height) {
-  if (height >= 1440) return "q4k";
-  if (height >= 900)  return "q1080";
-  if (height >= 600)  return "q720";
-  if (height >= 400)  return "q480";
+  if (height >= 1900) return "q2160";  // 2160p, 2140p, 2000p
+  if (height >= 1200) return "q1440";  // 1600p, 1440p, 1280p
+  if (height >= 900)  return "q1080";  // 1080p, 1050p, 900p
+  if (height >= 600)  return "q720";   // 720p, 704p, 640p
+  if (height >= 400)  return "q480";   // 480p, 426p, 400p
   return null;
 }
 
@@ -164,13 +164,33 @@ function cleanDesc(desc) {
   return String(desc).replace(/,\s*4K\?/i, "").replace(/\s*4K\?\s*$/i, "").trim();
 }
 
+// Rank for sorting: Auto first, then quality tiers high→low
+function rankOf(tier) {
+  if (tier === "auto")  return 0;
+  if (tier === "q2160") return 1;
+  if (tier === "q1440") return 2;
+  if (tier === "q1080") return 3;
+  if (tier === "q720")  return 4;
+  if (tier === "q480")  return 5;
+  return 9;
+}
+
+// Invisible Unicode Variation Selector prefixes — force Nuvio to keep
+// our order regardless of what its own sorter does. Same technique the
+// 4KHDHub scraper uses.
+function invisiblePrefix(index) {
+  if (index < 16)  return String.fromCodePoint(0xFE00 + index);          // VS1..VS16
+  if (index < 256) return String.fromCodePoint(0xE0100 + (index - 16));  // VS17..VS256
+  return "";
+}
+
 // ============================================================
 // MAIN
 // ============================================================
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
     const resolved = resolveSettings(settings);
-    console.log("[VidFast] auto=" + resolved.auto + " 4k=" + resolved.q4k + " 1080=" + resolved.q1080 + " 720=" + resolved.q720 + " 480=" + resolved.q480);
+    console.log("[VidFast] auto=" + resolved.auto + " 2160=" + resolved.q2160 + " 1440=" + resolved.q1440 + " 1080=" + resolved.q1080 + " 720=" + resolved.q720 + " 480=" + resolved.q480);
 
     const tmdb = yield getTmdbDetails(tmdbId, type);
     if (!tmdb) return [];
@@ -257,7 +277,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
         ? decoded.tracks.filter(function (t) { return t && t.file; }).map(function (t) { return { language: t.label || "Subtitle", url: t.file }; })
         : [];
 
-      // Parse variants if HLS
       let variants = [];
       if (isHls) {
         try {
@@ -268,11 +287,10 @@ function getStreams(tmdbId, type, season, episode, settings) {
         } catch (e) { console.log("[VidFast] master parse failed on " + serverName + ": " + e.message); }
       }
 
-      // Build entries
       const entries = [];
 
       if (resolved.auto) {
-        entries.push({ label: "Auto", url: decoded.url, codec: "", bw: 0 });
+        entries.push({ label: "Auto", url: decoded.url, codec: "", rank: rankOf("auto") });
       }
 
       if (isHls && variants.length) {
@@ -281,23 +299,21 @@ function getStreams(tmdbId, type, season, episode, settings) {
           const tier = tierOf(v.height);
           if (!tier || !resolved[tier]) continue;
           const label = v.height ? (v.height + "p") : ("Q" + (k + 1));
-          entries.push({ label: label, url: v.url, codec: v.codec, bw: v.bandwidth });
+          entries.push({ label: label, url: v.url, codec: v.codec, rank: rankOf(tier) });
         }
       }
 
-      // Skip server if no entries matched
+      // If nothing matched the user's toggles, skip this server entirely
       if (!entries.length) {
         console.log("[VidFast] Skipping " + serverName + " — no matching qualities");
         continue;
       }
 
-      // Emit each entry
       for (let k = 0; k < entries.length; k++) {
         const e = entries[k];
 
         const tagParts = [serverName, e.label];
         if (e.codec) tagParts.push(e.codec);
-        if (e.bw) tagParts.push(formatMbps(e.bw));
         if (serverDesc) tagParts.push(serverDesc);
         const tagLine = tagParts.join(" • ");
 
@@ -309,9 +325,20 @@ function getStreams(tmdbId, type, season, episode, settings) {
           url: e.url,
           headers: streamHeaders,
           subtitles: subs,
-          behaviorHints: { bingeGroup: "vidfast-" + serverName + "-" + e.label }
+          behaviorHints: { bingeGroup: "vidfast-" + serverName + "-" + e.label },
+          __rank: e.rank
         });
       }
+    }
+
+    // Sort by quality tier — Auto first, then 2160p, 1440p, 1080p, 720p, 480p.
+    // Stable sort keeps servers in original order within each tier.
+    streams.sort(function (a, b) { return a.__rank - b.__rank; });
+
+    // Apply invisible Unicode prefixes so Nuvio's own sorter can't reorder them.
+    for (let i = 0; i < streams.length; i++) {
+      streams[i].name = invisiblePrefix(i) + streams[i].name;
+      delete streams[i].__rank;
     }
 
     console.log("[VidFast] " + streams.length + " streams emitted");

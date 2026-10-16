@@ -56,44 +56,45 @@ function decVidFast(encrypted) {
 }
 
 // ============================================================
-// SETTINGS
+// SETTINGS — one toggle per quality tier
 // ============================================================
 function onSettings() {
   return [
-    {
-      type: "select",
-      key: "mode",
-      name: "mode",
-      label: "Quality Mode",
-      options: [
-        { label: "Split qualities (one stream per quality — for stock Nuvio)", value: "split" },
-        { label: "Auto only (single stream, use player's picker)", value: "auto" },
-        { label: "Both (Auto + every quality)", value: "both" }
-      ],
-      default: "split"
-    }
+    { type: "toggle", key: "auto",  name: "auto",  label: "Auto (master playlist — adaptive)", default: true },
+    { type: "toggle", key: "q4k",   name: "q4k",   label: "4K (1440p and above)",              default: false },
+    { type: "toggle", key: "q1080", name: "q1080", label: "1080p",                            default: true },
+    { type: "toggle", key: "q720",  name: "q720",  label: "720p",                             default: false },
+    { type: "toggle", key: "q480",  name: "q480",  label: "480p",                             default: false }
   ];
 }
 
 function resolveSettings(input) {
-  const s = { mode: "split" };
+  const out = { auto: true, q4k: false, q1080: true, q720: false, q480: false };
   try {
-    let settings = input;
-    if (!settings && typeof globalThis !== "undefined") settings = globalThis.SCRAPER_SETTINGS || globalThis.SETTINGS || globalThis.settings;
-    if (!settings && typeof global !== "undefined") settings = global.SCRAPER_SETTINGS || global.SETTINGS || global.settings;
-    if (!settings && typeof window !== "undefined") settings = window.SCRAPER_SETTINGS || window.SETTINGS || window.settings;
-    if (settings) {
-      let m = settings.mode || settings.qualityMode || settings.quality_mode || "";
-      if (typeof m === "object" && m !== null) m = m.value || m.key || "";
-      const norm = String(m).toLowerCase().trim();
-      if (norm === "auto" || norm === "split" || norm === "both") s.mode = norm;
-    }
-  } catch (e) { console.log("[VidFast] settings parse error: " + e.message); }
-  return s;
+    let s = input;
+    if (!s && typeof globalThis !== "undefined") s = globalThis.SCRAPER_SETTINGS || globalThis.SETTINGS || globalThis.settings;
+    if (!s && typeof global !== "undefined") s = global.SCRAPER_SETTINGS || global.SETTINGS || global.settings;
+    if (!s && typeof window !== "undefined") s = window.SCRAPER_SETTINGS || window.SETTINGS || window.settings;
+    if (!s) return out;
+
+    const keys = ["auto", "q4k", "q1080", "q720", "q480"];
+    const present = keys.filter(function (k) { return s[k] !== undefined; });
+    if (!present.length) return out;
+
+    keys.forEach(function (k) {
+      let v = s[k];
+      if (typeof v === "object" && v !== null) v = v.value !== undefined ? v.value : v.key;
+      if (v === true || v === "true" || v === "on" || v === "yes" || v === 1 || v === "1") out[k] = true;
+      else if (v === false || v === "false" || v === "off" || v === "no" || v === 0 || v === "0") out[k] = false;
+    });
+
+    if (!out.auto && !out.q4k && !out.q1080 && !out.q720 && !out.q480) out.auto = true;
+  } catch (e) { console.log("[VidFast] settings parse: " + e.message); }
+  return out;
 }
 
 // ============================================================
-// HLS MASTER PARSING
+// HELPERS
 // ============================================================
 function parseHlsVariants(masterUrl, text) {
   const lines = text.split(/\r?\n/);
@@ -102,15 +103,12 @@ function parseHlsVariants(masterUrl, text) {
     const line = lines[i].trim();
     if (line.indexOf("#EXT-X-STREAM-INF") !== 0) continue;
 
-    // Resolution — pull exact height, no remapping
     const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
     const height = resMatch ? parseInt(resMatch[1]) : 0;
 
-    // Bandwidth — bits per second
     const bwMatch = line.match(/BANDWIDTH=(\d+)/i);
     const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
 
-    // Codec — for "H.264" style tags
     let codec = "";
     const codecMatch = line.match(/CODECS="([^"]+)"/i);
     if (codecMatch) {
@@ -121,7 +119,6 @@ function parseHlsVariants(masterUrl, text) {
       else if (c.indexOf("vp9") >= 0) codec = "VP9";
     }
 
-    // URI on the next non-comment line
     let uri = null;
     for (let j = i + 1; j < lines.length; j++) {
       const l = lines[j].trim();
@@ -130,22 +127,18 @@ function parseHlsVariants(masterUrl, text) {
     if (!uri) continue;
 
     let absolute;
-    if (uri.indexOf("http") === 0) {
-      absolute = uri;
-    } else {
+    if (uri.indexOf("http") === 0) absolute = uri;
+    else {
       const slash = masterUrl.lastIndexOf("/");
       const base = slash >= 0 ? masterUrl.substring(0, slash + 1) : masterUrl;
       if (uri.charAt(0) === "/") {
         try { absolute = new URL(uri, masterUrl).toString(); }
         catch (e) { absolute = base + uri.replace(/^\//, ""); }
-      } else {
-        absolute = base + uri;
-      }
+      } else absolute = base + uri;
     }
 
     variants.push({ height: height, bandwidth: bandwidth, codec: codec, url: absolute });
   }
-  // Sort high → low by bandwidth (fallback to height)
   variants.sort(function (a, b) {
     if (b.bandwidth !== a.bandwidth) return b.bandwidth - a.bandwidth;
     return b.height - a.height;
@@ -158,13 +151,26 @@ function formatMbps(bps) {
   return (bps / 1000000).toFixed(1) + " Mbps";
 }
 
+function tierOf(height) {
+  if (height >= 1440) return "q4k";
+  if (height >= 900)  return "q1080";
+  if (height >= 600)  return "q720";
+  if (height >= 400)  return "q480";
+  return null;
+}
+
+function cleanDesc(desc) {
+  if (!desc) return "";
+  return String(desc).replace(/,\s*4K\?/i, "").replace(/\s*4K\?\s*$/i, "").trim();
+}
+
 // ============================================================
 // MAIN
 // ============================================================
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
     const resolved = resolveSettings(settings);
-    console.log("[VidFast] Mode: " + resolved.mode);
+    console.log("[VidFast] auto=" + resolved.auto + " 4k=" + resolved.q4k + " 1080=" + resolved.q1080 + " 720=" + resolved.q720 + " 480=" + resolved.q480);
 
     const tmdb = yield getTmdbDetails(tmdbId, type);
     if (!tmdb) return [];
@@ -181,7 +187,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
     if (!tokenMatch) { console.log("[VidFast] Page token not found"); return []; }
     const pageToken = tokenMatch[1];
 
-    // === Stage 1 ===
     const s1Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(pageToken) + "&stage=1");
     if (s1Resp.status < 200 || s1Resp.status >= 400) { console.log("[VidFast] Stage1 HTTP " + s1Resp.status); return []; }
     let s1; try { s1 = JSON.parse(s1Resp.text); } catch (e) { return []; }
@@ -189,7 +194,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
     const stage1Url = s1.result.stage1;
     const csrf1 = s1.result.token;
 
-    // === POST stage1 URL ===
     const stageHeaders = {
       "Referer": "https://vidfast.vc/",
       "X-Requested-With": "XMLHttpRequest",
@@ -200,7 +204,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
     const stageText = s1Post.text.trim();
     if (!stageText) { console.log("[VidFast] Stage1-POST empty"); return []; }
 
-    // === Stage 2 ===
     const s2Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(stageText) + "&stage=2");
     if (s2Resp.status < 200 || s2Resp.status >= 400) { console.log("[VidFast] Stage2 HTTP " + s2Resp.status); return []; }
     let s2; try { s2 = JSON.parse(s2Resp.text); } catch (e) { return []; }
@@ -215,7 +218,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
       "X-CSRF-Token": csrf2
     };
 
-    // === Server list ===
     const srvResp = yield req(serversUrl, { method: "POST", headers: apiHeaders });
     if (srvResp.status < 200 || srvResp.status >= 400) { console.log("[VidFast] Servers HTTP " + srvResp.status); return []; }
     let servers;
@@ -249,14 +251,13 @@ function getStreams(tmdbId, type, season, episode, settings) {
       const isDash = decoded.url.indexOf(".mpd") >= 0;
       const isHls = !isDash && decoded.url.indexOf(".m3u8") >= 0;
       const serverName = item.name || ("S" + (i + 1));
-      const serverDesc = item.description || "";
-      const is4k = !!decoded["4kAvailable"];
+      const serverDesc = cleanDesc(item.description);
 
       const subs = Array.isArray(decoded.tracks)
         ? decoded.tracks.filter(function (t) { return t && t.file; }).map(function (t) { return { language: t.label || "Subtitle", url: t.file }; })
         : [];
 
-      // Parse the master playlist to see actual variants
+      // Parse variants if HLS
       let variants = [];
       if (isHls) {
         try {
@@ -267,48 +268,48 @@ function getStreams(tmdbId, type, season, episode, settings) {
         } catch (e) { console.log("[VidFast] master parse failed on " + serverName + ": " + e.message); }
       }
 
+      // Build entries
       const entries = [];
 
-      if (isDash) {
-        // DASH: no split possible, emit as-is
-        entries.push({ label: "DASH", detail: "", url: decoded.url });
-      } else if (!isHls || !variants.length) {
-        // Single-quality HLS (no variants) or non-m3u8: emit as-is
-        entries.push({ label: "Auto", detail: "", url: decoded.url });
-      } else {
-        // Multi-variant HLS
-        if (resolved.mode === "auto" || resolved.mode === "both") {
-          entries.push({ label: "Auto", detail: "", url: decoded.url });
-        }
-        if (resolved.mode === "split" || resolved.mode === "both") {
-          for (let k = 0; k < variants.length; k++) {
-            const v = variants[k];
-            const label = v.height ? (v.height + "p") : ("Q" + (k + 1));
-            const detailParts = [];
-            if (v.codec) detailParts.push(v.codec);
-            if (v.bandwidth) detailParts.push(formatMbps(v.bandwidth));
-            entries.push({ label: label, detail: detailParts.join(" · "), url: v.url });
-          }
+      if (resolved.auto) {
+        entries.push({ label: "Auto", url: decoded.url, codec: "", bw: 0 });
+      }
+
+      if (isHls && variants.length) {
+        for (let k = 0; k < variants.length; k++) {
+          const v = variants[k];
+          const tier = tierOf(v.height);
+          if (!tier || !resolved[tier]) continue;
+          const label = v.height ? (v.height + "p") : ("Q" + (k + 1));
+          entries.push({ label: label, url: v.url, codec: v.codec, bw: v.bandwidth });
         }
       }
 
+      // Skip server if no entries matched
+      if (!entries.length) {
+        console.log("[VidFast] Skipping " + serverName + " — no matching qualities");
+        continue;
+      }
+
+      // Emit each entry
       for (let k = 0; k < entries.length; k++) {
         const e = entries[k];
-        const tagParts = ["VidFast", serverName, e.label];
-        if (e.detail) tagParts.push(e.detail);
-        if (is4k) tagParts.push("4K Available");
+
+        const tagParts = [serverName, e.label];
+        if (e.codec) tagParts.push(e.codec);
+        if (e.bw) tagParts.push(formatMbps(e.bw));
         if (serverDesc) tagParts.push(serverDesc);
         const tagLine = tagParts.join(" • ");
 
         streams.push({
-          name: "VidFast " + serverName + " " + e.label,
+          name: serverName + " " + e.label,
           title: [titleLine, tagLine].join("\n"),
           size: [titleLine, tagLine].join("\n"),
           description: [titleLine, tagLine].join("\n"),
           url: e.url,
           headers: streamHeaders,
           subtitles: subs,
-          behaviorHints: { bingeGroup: "vidfast-" + serverName }
+          behaviorHints: { bingeGroup: "vidfast-" + serverName + "-" + e.label }
         });
       }
     }

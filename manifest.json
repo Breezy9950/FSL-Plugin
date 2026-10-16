@@ -1,6 +1,6 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "4KHDHub direct links with configurable source and sort preferences, plus VixSrc HLS",
   "scrapers": [
     {
@@ -18,17 +18,17 @@
       "contentLanguage": ["en"]
     },
     {
-      "id": "maxstream-videasy",
-      "name": "Videasy",
-      "description": "Videasy direct HLS/DASH (MaxStream port)",
+      "id": "maxstream-vidfast",
+      "name": "VidFast",
+      "description": "VidFast direct HLS/DASH via enc-dec.app (MaxStream port)",
       "version": "1.0.0",
       "author": "Breezy9950",
-      "filename": "providers/videasy.js",
+      "filename": "providers/vidfast.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
       "hasSettings": false,
       "formats": ["mkv", "mp4"],
-      "logo": "https://www.google.com/s2/favicons?domain=player.videasy.to&sz=128",
+      "logo": "https://www.google.com/s2/favicons?domain=vidfast.io&sz=128",
       "contentLanguage": ["en"]
     }
   ]

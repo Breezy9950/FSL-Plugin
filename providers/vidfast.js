@@ -24,6 +24,14 @@ function fetchRaw(_0) {
   });
 }
 
+function fetchText(_0) {
+  return __async(this, arguments, function* (url, options = {}) {
+    const r = yield fetchRaw(url, options);
+    if (r.status < 200 || r.status >= 400) return null;
+    return r.text;
+  });
+}
+
 function getTmdbDetails(tmdbId, type) {
   return __async(this, null, function* () {
     const isSeries = type === "series" || type === "tv";
@@ -33,6 +41,23 @@ function getTmdbDetails(tmdbId, type) {
         ? { title: d.name, year: d.first_air_date ? parseInt(d.first_air_date.split("-")[0]) : 0 }
         : { title: d.title, year: d.release_date ? parseInt(d.release_date.split("-")[0]) : 0 };
     } catch (e) { return null; }
+  });
+}
+
+function encDecDecrypt(encrypted) {
+  return __async(this, null, function* () {
+    const r = yield fetchRaw("https://enc-dec.app/api/dec-vidfast", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: encrypted })
+    });
+    if (r.status < 200 || r.status >= 400) return null;
+    let j;
+    try { j = JSON.parse(r.text); } catch (e) { return null; }
+    if (j.status !== 200) return null;
+    let res = j.result;
+    if (typeof res === "string") { try { res = JSON.parse(res); } catch (e) {} }
+    return res;
   });
 }
 
@@ -48,127 +73,62 @@ function getStreams(tmdbId, type, season, episode, settings) {
       ? "https://vidfast.io/movie/" + tmdbId
       : "https://vidfast.io/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1);
 
-    const pageResp = yield fetchRaw(pageUrl);
-    if (pageResp.status < 200 || pageResp.status >= 400) {
-      throw new Error("VidFast: page HTTP " + pageResp.status);
-    }
-    const html = pageResp.text;
+    const html = yield fetchText(pageUrl);
+    if (!html) throw new Error("VidFast: page fetch failed");
 
-    const escapedMatch = html.match(/\\"(?:en|token)\\":\\"([^"\\]+)\\"/);
-    const plainMatch   = html.match(/"(?:en|token)":"([^"\\]{20,})"/);
+    const tokenMatch = html.match(/\\"(?:en|token)\\":\\"([^"\\]+)\\"/);
+    if (!tokenMatch) throw new Error("VidFast: token regex miss (len=" + html.length + ")");
+    const pageToken = tokenMatch[1];
 
-    if (!escapedMatch && !plainMatch) {
-      throw new Error("VidFast: no token regex match. len=" + html.length
-        + " hasNext=" + (html.indexOf("__NEXT_DATA__") >= 0)
-        + " head=" + html.substring(0, 400).replace(/\s+/g, " "));
-    }
-
-    const pageToken = escapedMatch ? escapedMatch[1] : plainMatch[1];
-
-    // === Try GET first (matches Kotlin source) ===
-    const getUrl = "https://enc-dec.app/api/enc-vidfast?text=" + encodeURIComponent(pageToken);
-    const getResp = yield fetchRaw(getUrl);
-
-    if (getResp.status >= 200 && getResp.status < 400) {
-      // GET worked — proceed as before
-      return yield runHandshake(getResp.text, tmdbDetails, isMovie, season, episode, tmdbId);
-    }
-
-    // === GET failed — try POST fallback ===
-    const postResp = yield fetchRaw("https://enc-dec.app/api/enc-vidfast", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: pageToken })
-    });
-
-    if (postResp.status >= 200 && postResp.status < 400) {
-      return yield runHandshake(postResp.text, tmdbDetails, isMovie, season, episode, tmdbId);
-    }
-
-    // === Both failed — throw everything we know ===
-    throw new Error(
-      "VidFast enc-dec rejected. " +
-      "GET.status=" + getResp.status + " " +
-      "GET.body=" + getResp.text.substring(0, 180) + " | " +
-      "POST.status=" + postResp.status + " " +
-      "POST.body=" + postResp.text.substring(0, 180) + " | " +
-      "tokenLen=" + pageToken.length + " " +
-      "tokenHead=" + pageToken.substring(0, 60)
+    // === Stage 1: get CSRF token ===
+    const stage1Text = yield fetchText(
+      "https://enc-dec.app/api/enc-vidfast?text=" + encodeURIComponent(pageToken) + "&stage=1"
     );
-  });
-}
-
-function runHandshake(handshakeBody, tmdbDetails, isMovie, season, episode, tmdbId) {
-  return __async(this, null, function* () {
-    let handshake;
-    try { handshake = JSON.parse(handshakeBody); }
-    catch (e) { throw new Error("VidFast: handshake not JSON: " + handshakeBody.substring(0, 200)); }
-
-    if (handshake.status !== 200) {
-      throw new Error("VidFast: handshake status=" + handshake.status + " body=" + handshakeBody.substring(0, 200));
+    if (!stage1Text) throw new Error("VidFast: stage 1 fetch failed");
+    let stage1;
+    try { stage1 = JSON.parse(stage1Text); } catch (e) { throw new Error("VidFast: stage1 not JSON"); }
+    if (stage1.status !== 200 || !stage1.result) {
+      throw new Error("VidFast: stage1 status=" + stage1.status);
     }
-    const boot = handshake.result;
-    if (!boot) throw new Error("VidFast: handshake result missing: " + handshakeBody.substring(0, 200));
+    const csrfToken = stage1.result.token;
 
-    const serversUrl = boot.servers;
-    const streamBase = boot.stream;
-    if (!serversUrl || !streamBase) {
-      throw new Error("VidFast: handshake keys=" + Object.keys(boot).join(","));
+    // === Stage 2: get servers + stream base URLs ===
+    const stage2Text = yield fetchText(
+      "https://enc-dec.app/api/enc-vidfast?text=" + encodeURIComponent(pageToken) + "&stage=2"
+    );
+    if (!stage2Text) throw new Error("VidFast: stage 2 fetch failed");
+    let stage2;
+    try { stage2 = JSON.parse(stage2Text); } catch (e) { throw new Error("VidFast: stage2 not JSON"); }
+    if (stage2.status !== 200 || !stage2.result) {
+      throw new Error("VidFast: stage2 status=" + stage2.status);
     }
+    const serversUrl = stage2.result.servers;
+    const streamBase = stage2.result.stream;
+    if (!serversUrl || !streamBase) throw new Error("VidFast: stage2 missing urls");
 
-    const apiHeaders = { "Referer": "https://vidfast.io/", "User-Agent": USER_AGENT };
-    if (boot.token) apiHeaders["X-CSRF-Token"] = boot.token;
+    const apiHeaders = {
+      "Referer": "https://vidfast.io/",
+      "User-Agent": USER_AGENT
+    };
+    if (csrfToken) apiHeaders["X-CSRF-Token"] = csrfToken;
 
-    const encServersResp = yield fetchRaw(serversUrl, { method: "POST", headers: apiHeaders, body: "" });
-    if (encServersResp.status < 200 || encServersResp.status >= 400) {
-      throw new Error("VidFast: servers HTTP " + encServersResp.status + " url=" + serversUrl);
-    }
+    // === Fetch encrypted server list ===
+    const encServers = yield fetchText(serversUrl, { method: "POST", headers: apiHeaders, body: "" });
+    if (!encServers) throw new Error("VidFast: servers fetch failed");
 
-    const decResp = yield fetchRaw("https://enc-dec.app/api/dec-vidfast", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: encServersResp.text })
-    });
-    if (decResp.status < 200 || decResp.status >= 400) {
-      throw new Error("VidFast: dec-vidfast HTTP " + decResp.status + " body=" + decResp.text.substring(0, 180));
-    }
-
-    let decJson;
-    try { decJson = JSON.parse(decResp.text); }
-    catch (e) { throw new Error("VidFast: dec-vidfast not JSON: " + decResp.text.substring(0, 200)); }
-
-    if (decJson.status !== 200) {
-      throw new Error("VidFast: dec-vidfast status=" + decJson.status + " body=" + decResp.text.substring(0, 200));
+    const servers = yield encDecDecrypt(encServers);
+    if (!Array.isArray(servers) || !servers.length) {
+      throw new Error("VidFast: server list not array or empty");
     }
 
-    let servers = decJson.result;
-    if (typeof servers === "string") { try { servers = JSON.parse(servers); } catch (e) {} }
-    if (!Array.isArray(servers)) {
-      throw new Error("VidFast: servers not array, type=" + typeof servers + " val=" + JSON.stringify(servers).substring(0, 200));
-    }
-    if (!servers.length) throw new Error("VidFast: servers empty");
-
+    // === Iterate servers for a playable URL ===
     for (let i = 0; i < servers.length; i++) {
       const item = servers[i];
       if (!item || !item.data) continue;
       const url = streamBase + "/" + item.data;
-      const encSourceResp = yield fetchRaw(url, { method: "POST", headers: apiHeaders, body: "" });
-      if (encSourceResp.status < 200 || encSourceResp.status >= 400) continue;
-
-      const srcDecResp = yield fetchRaw("https://enc-dec.app/api/dec-vidfast", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: encSourceResp.text })
-      });
-      if (srcDecResp.status < 200 || srcDecResp.status >= 400) continue;
-
-      let srcJson;
-      try { srcJson = JSON.parse(srcDecResp.text); }
-      catch (e) { continue; }
-      if (srcJson.status !== 200) continue;
-
-      let source = srcJson.result;
-      if (typeof source === "string") { try { source = JSON.parse(source); } catch (e) {} }
+      const encSource = yield fetchText(url, { method: "POST", headers: apiHeaders, body: "" });
+      if (!encSource) continue;
+      const source = yield encDecDecrypt(encSource);
       if (!source || typeof source !== "object") continue;
       const streamUrl = source.url;
       if (!streamUrl) continue;

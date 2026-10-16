@@ -153,18 +153,6 @@ function onSettings() {
   return [
     {
       type: "select",
-      key: "source",
-      name: "source",
-      label: "Preferred Source",
-      options: [
-        { label: "FSL", value: "fsl" },
-        { label: "Pixel", value: "pixel" },
-        { label: "All Sources", value: "all" }
-      ],
-      default: "fsl"
-    },
-    {
-      type: "select",
       key: "sort",
       name: "sort",
       label: "Sort By",
@@ -177,23 +165,13 @@ function onSettings() {
   ];
 }
 function resolveSettings(input) {
-  const LABEL_MAP = {
-    fsl: "FSL",
-    pixel: "Pixel",
-    all: null, any: null
-  };
-  let s = { sourceLabel: "FSL", sortBy: "quality" };
+  let s = { sourceLabel: null, sortBy: "quality" };
   try {
     let settings = input;
     if (!settings && typeof globalThis !== "undefined") settings = globalThis.SCRAPER_SETTINGS || globalThis.SETTINGS || globalThis.settings;
     if (!settings && typeof global !== "undefined") settings = global.SCRAPER_SETTINGS || global.SETTINGS || global.settings;
     if (!settings && typeof window !== "undefined") settings = window.SCRAPER_SETTINGS || window.SETTINGS || window.settings;
     if (settings) {
-      let rawSrc = settings.source || settings.src || settings.preferred_source || "";
-      if (typeof rawSrc === "object" && rawSrc !== null) rawSrc = rawSrc.value || rawSrc.key || "";
-      const normSrc = String(rawSrc).toLowerCase().trim();
-      if (normSrc && LABEL_MAP.hasOwnProperty(normSrc)) s.sourceLabel = LABEL_MAP[normSrc];
-
       let rawSort = settings.sort || settings.sortBy || settings.sort_by || "";
       if (typeof rawSort === "object" && rawSort !== null) rawSort = rawSort.value || rawSort.key || "";
       const normSort = String(rawSort).toLowerCase().trim();
@@ -348,25 +326,30 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     $("a").each((_, el) => {
-      const text = ($(el).text() || "").trim();
       const href = $(el).attr("href") || "";
+      const cls = $(el).attr("class") || "";
       const id = $(el).attr("id") || "";
+      const text = ($(el).text() || "").trim();
       if (!href || href.startsWith("#") || href.startsWith("/")) return;
 
-      // FSL — direct R2 object URL, or explicit FSL label/id
-      if (id === "fsl" || /\bFSL\b/i.test(text) || href.includes("r2.cloudflarestorage.com")) {
-        results.push({ source: "FSL", url: href, meta: currentMeta, headers: {} });
-        return;
-      }
+      // Skip Pixel — dead Google Drive proxy
+      if (href.includes("pixel.hubcloud.ist")) return;
 
-      // Pixel — Google Drive proxy via pixel.hubcloud.ist
-      if (href.includes("pixel.hubcloud.ist")) {
-        results.push({
-          source: "Pixel",
-          url: href,
-          meta: currentMeta,
-          headers: { "Referer": "https://hubcloud.ist/" }
-        });
+      // Primary download button — btn-success, or FSL markers
+      if (cls.includes("btn-success") || id === "fsl" || /\bFSL\b/i.test(text) || href.includes("r2.cloudflarestorage.com")) {
+        let label = "Direct R2";
+        if (href.includes("r2.cloudflarestorage.com") || id === "fsl" || /\bFSL\b/i.test(text)) {
+          label = "FSL";
+        } else {
+          try {
+            const host = new URL(href).hostname.toLowerCase();
+            if (host.indexOf("hubcloud") >= 0) label = "HubCloud";
+            else if (host.indexOf("hubdrive") >= 0) label = "HubDrive";
+            else if (host.indexOf("hubstream") >= 0) label = "HubStream";
+            else if (host.indexOf("workers.dev") >= 0) label = "Direct R2";
+          } catch (e) {}
+        }
+        results.push({ source: label, url: href, meta: currentMeta, headers: {} });
         return;
       }
     });
@@ -417,7 +400,7 @@ var cheerio3 = require("cheerio-without-node-native");
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
     const resolved = resolveSettings(settings);
-    console.log(`[4KHDHub] Preferred source: ${resolved.sourceLabel || "all"} | Sort: ${resolved.sortBy}`);
+    console.log(`[4KHDHub] Sort: ${resolved.sortBy}`);
 
     const tmdbDetails = yield getTmdbDetails(tmdbId, type);
     if (!tmdbDetails) return [];
@@ -456,7 +439,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
         return extractedLinks.map((link) => {
           const height = sourceResult.meta.height || 0;
           const qualityShort = height === 2160 ? "4K" : height ? height + "p" : "";
-          const qualityFull = height === 2160 ? "2160p" : height ? height + "p" : "";
 
           const info = parseReleaseInfo(link.meta.title);
 
@@ -477,7 +459,6 @@ function getStreams(tmdbId, type, season, episode, settings) {
           if (audioLine) lines.push(audioLine);
           const description = lines.join("\n");
 
-          // Base name — rank prefix gets added later, after global sort
           const baseName = qualityShort ? `4KHDHub ${qualityShort}` : "4KHDHub";
 
           const streamObj = {
@@ -504,22 +485,16 @@ function getStreams(tmdbId, type, season, episode, settings) {
     const results = yield Promise.all(streamPromises);
     const flat = results.reduce((acc, val) => acc.concat(val), []);
 
-    // ---- Source filter ----
-    const visible = resolved.sourceLabel
-      ? flat.filter(r => r.behaviorHints && r.behaviorHints.bingeGroup === `4khdhub-${resolved.sourceLabel}`)
-      : flat;
-    console.log(`[4KHDHub] Filter (${resolved.sourceLabel || "all"}): ${visible.length}/${flat.length}`);
-
     // ---- Dedupe by URL ----
     const seen = new Set();
     const deduped = [];
-    for (const r of visible) {
+    for (const r of flat) {
       const key = r.url;
       if (seen.has(key)) continue;
       seen.add(key);
       deduped.push(r);
     }
-    console.log(`[4KHDHub] After dedupe: ${deduped.length}/${visible.length} kept`);
+    console.log(`[4KHDHub] After dedupe: ${deduped.length}/${flat.length} kept`);
 
     // ---- Sort by chosen mode ----
     if (resolved.sortBy === "size") {
@@ -531,9 +506,7 @@ function getStreams(tmdbId, type, season, episode, settings) {
       });
     }
 
-   // ---- Assign invisible sort prefix using Unicode Variation Selectors ----
-    // VS1..VS16 (U+FE00-U+FE0F) + VS17..VS256 (U+E0100-U+E01EF) = 256 levels
-    // Invisible, zero-width, and their codepoints ascend with rank.
+    // ---- Assign invisible sort prefix using Unicode Variation Selectors ----
     for (let i = 0; i < deduped.length; i++) {
       const r = deduped[i];
       let prefix = "";

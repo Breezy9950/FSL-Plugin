@@ -1,7 +1,7 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.0.2",
-  "description": "4KHDHub direct links with configurable source and sort preferences",
+  "version": "1.0.3",
+  "description": "4KHDHub direct links with configurable source and sort preferences, plus VixSrc HLS",
   "scrapers": [
     {
       "id": "4khdhub",
@@ -15,6 +15,20 @@
       "hasSettings": true,
       "formats": ["mkv"],
       "logo": "https://www.google.com/s2/favicons?domain=4khdhub.click&sz=128",
+      "contentLanguage": ["en"]
+    },
+    {
+      "id": "maxstream-vixsrc",
+      "name": "VixSrc",
+      "description": "VixSrc direct HLS (MaxStream port)",
+      "version": "1.0.0",
+      "author": "Breezy9950",
+      "filename": "providers/vixsrc.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true,
+      "hasSettings": false,
+      "formats": ["mkv", "mp4"],
+      "logo": "https://www.google.com/s2/favicons?domain=vixsrc.to&sz=128",
       "contentLanguage": ["en"]
     }
   ]

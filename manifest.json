@@ -21,14 +21,14 @@
       "id": "maxstream-vidfast",
       "name": "VidFast",
       "description": "VidFast direct HLS/DASH via enc-dec.app (MaxStream port)",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": "Breezy9950",
       "filename": "providers/vidfast.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
-      "hasSettings": false,
+      "hasSettings": true,
       "formats": ["mkv", "mp4"],
-      "logo": "https://www.google.com/s2/favicons?domain=vidfast.io&sz=128",
+      "logo": "https://www.google.com/s2/favicons?domain=vidfast.vc&sz=128",
       "contentLanguage": ["en"]
     }
   ]

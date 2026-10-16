@@ -29,31 +29,26 @@ function getTmdbDetails(tmdbId, type) {
   return __async(this, null, function* () {
     const isSeries = type === "series" || type === "tv";
     const url = "https://api.themoviedb.org/3/" + (isSeries ? "tv" : "movie") + "/" + tmdbId + "?api_key=" + TMDB_API_KEY;
-    try { const r = yield fetch(url); const d = yield r.json();
-      return isSeries
-        ? { title: d.name, year: d.first_air_date ? parseInt(d.first_air_date.split("-")[0]) : 0 }
-        : { title: d.title, year: d.release_date ? parseInt(d.release_date.split("-")[0]) : 0 };
+    try {
+      const r = yield fetch(url);
+      const d = yield r.json();
+      if (isSeries) return { title: d.name, year: d.first_air_date ? parseInt(d.first_air_date.split("-")[0]) : 0 };
+      return { title: d.title, year: d.release_date ? parseInt(d.release_date.split("-")[0]) : 0 };
     } catch (e) { return null; }
   });
 }
 
-function decryptEncDec(encrypted) {
+function decVidFast(encrypted) {
   return __async(this, null, function* () {
     const r = yield req(API + "/dec-vidfast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: encrypted })
     });
-    if (r.status < 200 || r.status >= 400) {
-      throw new Error("dec-vidfast HTTP " + r.status + " body=" + r.text.substring(0, 150));
-    }
+    if (r.status < 200 || r.status >= 400) throw new Error("dec-vidfast HTTP " + r.status);
     let j;
-    try { j = JSON.parse(r.text); } catch (e) {
-      throw new Error("dec-vidfast not JSON: " + r.text.substring(0, 150));
-    }
-    if (j.status !== 200) {
-      throw new Error("dec-vidfast status=" + j.status + " error=" + (j.error || "unknown"));
-    }
+    try { j = JSON.parse(r.text); } catch (e) { throw new Error("dec-vidfast not JSON"); }
+    if (j.status !== 200) throw new Error("dec-vidfast status=" + j.status + " " + (j.error || ""));
     let res = j.result;
     if (typeof res === "string") { try { res = JSON.parse(res); } catch (e) {} }
     return res;
@@ -64,114 +59,113 @@ function onSettings() { return []; }
 
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
-    const tmdbDetails = yield getTmdbDetails(tmdbId, type);
-    if (!tmdbDetails) throw new Error("VidFast: TMDB fetch failed");
-
+    const tmdb = yield getTmdbDetails(tmdbId, type);
+    if (!tmdb) return [];
     const isMovie = type === "movie";
+
     const pageUrl = isMovie
       ? "https://vidfast.vc/movie/" + tmdbId + "/"
       : "https://vidfast.vc/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1) + "/";
 
+    console.log("[VidFast] Page: " + pageUrl);
     const page = yield req(pageUrl);
-    if (page.status < 200 || page.status >= 400) throw new Error("VidFast: page HTTP " + page.status);
+    if (page.status < 200 || page.status >= 400) { console.log("[VidFast] Page HTTP " + page.status); return []; }
 
     const tokenMatch = page.text.match(/\\"(?:en|token)\\":\\"([^"\\]+)\\"/);
-    if (!tokenMatch) throw new Error("VidFast: page token not found (len=" + page.text.length + ")");
+    if (!tokenMatch) { console.log("[VidFast] Page token not found"); return []; }
     const pageToken = tokenMatch[1];
+    console.log("[VidFast] Page token: " + pageToken.substring(0, 30) + "...");
 
-    // === STEP 1: stage 1 → get stage1 URL + CSRF1 ===
+    // === Stage 1 ===
     const s1Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(pageToken) + "&stage=1");
-    if (s1Resp.status < 200 || s1Resp.status >= 400) throw new Error("stage1 HTTP " + s1Resp.status);
-    let s1;
-    try { s1 = JSON.parse(s1Resp.text); } catch (e) { throw new Error("stage1 not JSON"); }
-    if (s1.status !== 200 || !s1.result) throw new Error("stage1 status=" + s1.status);
+    if (s1Resp.status < 200 || s1Resp.status >= 400) { console.log("[VidFast] Stage1 HTTP " + s1Resp.status); return []; }
+    let s1; try { s1 = JSON.parse(s1Resp.text); } catch (e) { return []; }
+    if (s1.status !== 200 || !s1.result) { console.log("[VidFast] Stage1 status " + s1.status); return []; }
     const stage1Url = s1.result.stage1;
     const csrf1 = s1.result.token;
 
-    // === STEP 2: POST stage1 URL → encrypted text ===
+    // === POST stage1 URL ===
     const stageHeaders = {
-      "User-Agent": USER_AGENT,
       "Referer": "https://vidfast.vc/",
       "X-Requested-With": "XMLHttpRequest",
       "X-CSRF-Token": csrf1
     };
     const s1Post = yield req(stage1Url, { method: "POST", headers: stageHeaders });
-    if (s1Post.status < 200 || s1Post.status >= 400) throw new Error("stage1-POST HTTP " + s1Post.status);
-    const encryptedStageToken = s1Post.text.trim();
-    if (!encryptedStageToken) throw new Error("stage1-POST returned empty");
+    if (s1Post.status < 200 || s1Post.status >= 400) { console.log("[VidFast] Stage1-POST HTTP " + s1Post.status); return []; }
+    const stageText = s1Post.text.trim();
+    if (!stageText) { console.log("[VidFast] Stage1-POST empty"); return []; }
 
-    // === STEP 3: stage 2 with the encrypted text → servers/stream URLs + CSRF2 ===
-    const s2Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(encryptedStageToken) + "&stage=2");
-    if (s2Resp.status < 200 || s2Resp.status >= 400) throw new Error("stage2 HTTP " + s2Resp.status);
-    let s2;
-    try { s2 = JSON.parse(s2Resp.text); } catch (e) { throw new Error("stage2 not JSON"); }
-    if (s2.status !== 200 || !s2.result) throw new Error("stage2 status=" + s2.status);
+    // === Stage 2 ===
+    const s2Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(stageText) + "&stage=2");
+    if (s2Resp.status < 200 || s2Resp.status >= 400) { console.log("[VidFast] Stage2 HTTP " + s2Resp.status); return []; }
+    let s2; try { s2 = JSON.parse(s2Resp.text); } catch (e) { return []; }
+    if (s2.status !== 200 || !s2.result) { console.log("[VidFast] Stage2 status " + s2.status); return []; }
     const serversUrl = s2.result.servers;
     const streamBase = s2.result.stream;
     const csrf2 = s2.result.token;
 
     const apiHeaders = {
-      "User-Agent": USER_AGENT,
       "Referer": "https://vidfast.vc/",
       "X-Requested-With": "XMLHttpRequest",
       "X-CSRF-Token": csrf2
     };
 
-    // === STEP 4: POST servers URL → encrypted server list ===
+    // === Server list ===
     const srvResp = yield req(serversUrl, { method: "POST", headers: apiHeaders });
-    if (srvResp.status < 200 || srvResp.status >= 400) throw new Error("servers HTTP " + srvResp.status + " body=" + srvResp.text.substring(0, 100));
+    if (srvResp.status < 200 || srvResp.status >= 400) { console.log("[VidFast] Servers HTTP " + srvResp.status); return []; }
+    let servers;
+    try { servers = yield decVidFast(srvResp.text); }
+    catch (e) { console.log("[VidFast] Server decrypt: " + e.message); return []; }
+    if (!Array.isArray(servers) || !servers.length) { console.log("[VidFast] Empty server list"); return []; }
+    console.log("[VidFast] " + servers.length + " servers");
 
-    // === STEP 5: decrypt server list ===
-    const servers = yield decryptEncDec(srvResp.text);
-    if (!Array.isArray(servers) || !servers.length) {
-      throw new Error("servers not array or empty (type=" + typeof servers + ")");
-    }
+    // === Iterate servers, decode each ===
+    const seSuffix = !isMovie && season && episode
+      ? " S" + String(season).padStart(2, "0") + "E" + String(episode).padStart(2, "0")
+      : "";
+    const titleLine = tmdb.title + " (" + tmdb.year + ")" + seSuffix;
 
-    // === STEP 6: iterate servers, POST stream/{data} → decrypt → final URL ===
+    const streams = [];
     for (let i = 0; i < servers.length; i++) {
       const item = servers[i];
       if (!item || !item.data) continue;
-      const streamUrl = streamBase + "/" + item.data + "/";
-      const streamResp = yield req(streamUrl, { method: "POST", headers: apiHeaders });
-      if (streamResp.status < 200 || streamResp.status >= 400) continue;
-
+      const url = streamBase + "/" + item.data;   // NOTE: no trailing slash
+      const enc = yield req(url, { method: "POST", headers: apiHeaders });
+      if (enc.status < 200 || enc.status >= 400) continue;
       let decoded;
-      try { decoded = yield decryptEncDec(streamResp.text); }
+      try { decoded = yield decVidFast(enc.text); }
       catch (e) { continue; }
-      if (!decoded || typeof decoded !== "object") continue;
+      if (!decoded || !decoded.url) continue;
 
-      const finalUrl = decoded.url || decoded.file || decoded.stream;
-      if (!finalUrl) continue;
+      const isDash = decoded.url.indexOf(".mpd") >= 0;
+      const tagParts = ["VidFast"];
+      if (item.name) tagParts.push(item.name);
+      tagParts.push(isDash ? "DASH" : "HLS");
+      if (decoded["4kAvailable"]) tagParts.push("4K");
+      if (item.description) tagParts.push(item.description);
+      const tagLine = tagParts.join(" • ");
 
-      const seSuffix = !isMovie && season && episode
-        ? " S" + String(season).padStart(2, "0") + "E" + String(episode).padStart(2, "0")
-        : "";
-      const titleLine = tmdbDetails.title + " (" + tmdbDetails.year + ")" + seSuffix;
-      const isDash = finalUrl.indexOf(".mpd") >= 0;
-      const tagLine = "VidFast • " + (isDash ? "DASH" : "HLS") + " • H.264";
-      const description = [titleLine, tagLine].join("\n");
-
-      const subtitles = Array.isArray(decoded.tracks)
-        ? decoded.tracks.filter((t) => t && (t.file || t.url))
-            .map((t) => ({ language: t.label || t.language || "Subtitle", url: t.file || t.url }))
+      const subs = Array.isArray(decoded.tracks)
+        ? decoded.tracks.filter((t) => t && t.file).map((t) => ({ language: t.label || "Subtitle", url: t.file }))
         : [];
 
-      return [{
-        name: "VidFast",
-        title: description,
-        size: description,
-        description: description,
-        url: finalUrl,
+      streams.push({
+        name: "VidFast" + (item.name ? " " + item.name : ""),
+        title: [titleLine, tagLine].join("\n"),
+        size: [titleLine, tagLine].join("\n"),
+        description: [titleLine, tagLine].join("\n"),
+        url: decoded.url,
         headers: {
-          "User-Agent": USER_AGENT,
-          "Referer": "https://vidfast.vc/"
+          "Referer": "https://vidfast.vc/",
+          "User-Agent": USER_AGENT
         },
-        subtitles: subtitles,
-        behaviorHints: { bingeGroup: "vidfast-" + (isDash ? "dash" : "hls") }
-      }];
+        subtitles: subs,
+        behaviorHints: { bingeGroup: "vidfast-" + (item.name || i) }
+      });
     }
 
-    throw new Error("VidFast: no playable server among " + servers.length);
+    console.log("[VidFast] " + streams.length + " playable streams");
+    return streams;
   });
 }
 

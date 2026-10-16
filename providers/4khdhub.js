@@ -158,9 +158,7 @@ function onSettings() {
       label: "Preferred Source",
       options: [
         { label: "FSL", value: "fsl" },
-        { label: "HubCloud 10Gbps", value: "hubcloud" },
-        { label: "Direct R2", value: "r2" },
-        { label: "ZipDisk", value: "zipdisk" },
+        { label: "Pixel", value: "pixel" },
         { label: "All Sources", value: "all" }
       ],
       default: "fsl"
@@ -181,14 +179,7 @@ function onSettings() {
 function resolveSettings(input) {
   const LABEL_MAP = {
     fsl: "FSL",
-    hubcloud: "HubCloud 10Gbps",
-    "hubcloud 10gbps": "HubCloud 10Gbps",
-    r2: "Direct R2",
-    "direct r2": "Direct R2",
-    zipdisk: "ZipDisk Server",
-    "zipdisk server": "ZipDisk Server",
-    hblinks: "Hblinks Direct",
-    "hblinks direct": "Hblinks Direct",
+    pixel: "Pixel",
     all: null, any: null
   };
   let s = { sourceLabel: "FSL", sortBy: "quality" };
@@ -357,13 +348,27 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     $("a").each((_, el) => {
-      const text = $(el).text().trim();
-      const href = $(el).attr("href");
-      if (!href) return;
-      if (text.includes("10Gbps") || text.includes("PixelServer") || href.includes("hubcloud.cx")) results.push({ source: "HubCloud 10Gbps", url: href, meta: currentMeta });
-      else if (text.includes("Download File") || href.includes("r2.dev")) results.push({ source: "Direct R2", url: href, meta: currentMeta });
-      else if (text.includes("ZipDisk") || href.includes("workers.dev")) results.push({ source: "ZipDisk Server", url: href, meta: currentMeta });
-      else if (text.includes("FSL")) results.push({ source: "FSL", url: href, meta: currentMeta });
+      const text = ($(el).text() || "").trim();
+      const href = $(el).attr("href") || "";
+      const id = $(el).attr("id") || "";
+      if (!href || href.startsWith("#") || href.startsWith("/")) return;
+
+      // FSL — direct R2 object URL, or explicit FSL label/id
+      if (id === "fsl" || /\bFSL\b/i.test(text) || href.includes("r2.cloudflarestorage.com")) {
+        results.push({ source: "FSL", url: href, meta: currentMeta, headers: {} });
+        return;
+      }
+
+      // Pixel — Google Drive proxy via pixel.hubcloud.ist
+      if (href.includes("pixel.hubcloud.ist")) {
+        results.push({
+          source: "Pixel",
+          url: href,
+          meta: currentMeta,
+          headers: { "Referer": "https://hubcloud.ist/" }
+        });
+        return;
+      }
     });
     return results;
   });
@@ -475,7 +480,7 @@ function getStreams(tmdbId, type, season, episode, settings) {
           // Base name — rank prefix gets added later, after global sort
           const baseName = qualityShort ? `4KHDHub ${qualityShort}` : "4KHDHub";
 
-          return {
+          const streamObj = {
             name: baseName,
             title: description,
             size: description,
@@ -485,6 +490,10 @@ function getStreams(tmdbId, type, season, episode, settings) {
             __sb: link.meta.bytes || 0,
             behaviorHints: { bingeGroup: `4khdhub-${link.source}` }
           };
+          if (link.headers && Object.keys(link.headers).length > 0) {
+            streamObj.headers = link.headers;
+          }
+          return streamObj;
         });
       } catch (err) {
         console.log(`[4KHDHub] Item processing error: ${err.message}`);
@@ -501,11 +510,11 @@ function getStreams(tmdbId, type, season, episode, settings) {
       : flat;
     console.log(`[4KHDHub] Filter (${resolved.sourceLabel || "all"}): ${visible.length}/${flat.length}`);
 
-    // ---- Dedupe ----
+    // ---- Dedupe by URL ----
     const seen = new Set();
     const deduped = [];
     for (const r of visible) {
-      const key = (r.description || "").replace(/\n/g, "|");
+      const key = r.url;
       if (seen.has(key)) continue;
       seen.add(key);
       deduped.push(r);

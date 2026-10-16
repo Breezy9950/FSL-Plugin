@@ -9,22 +9,22 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 
-var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
+var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 function fetchText(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const retries = options.retries !== undefined ? options.retries : 2;
-    const delay   = options.delay   !== undefined ? options.delay   : 800;
+    const retries = options.retries !== void 0 ? options.retries : 2;
+    const delay   = options.delay   !== void 0 ? options.delay   : 800;
     for (let i = 0; i <= retries; i++) {
       try {
-        const r = yield fetch(url, {
+        const response = yield fetch(url, {
           headers: Object.assign({ "User-Agent": USER_AGENT, "Accept": "*/*" }, options.headers || {})
         });
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return yield r.text();
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return yield response.text();
       } catch (err) {
-        console.log("[VixSrc] " + url + " -> " + err.message + (i < retries ? " (retry " + (i+1) + "/" + retries + ")" : ""));
+        console.log("[VixSrc] Request failed for " + url + ": " + err.message + (i < retries ? ", retrying (" + (i + 1) + "/" + retries + ")..." : ""));
       }
       if (i < retries) yield new Promise((r) => setTimeout(r, delay * Math.pow(2, i)));
     }
@@ -35,14 +35,16 @@ function fetchText(_0) {
 function getTmdbDetails(tmdbId, type) {
   return __async(this, null, function* () {
     const isSeries = type === "series" || type === "tv";
-    const url = "https://api.themoviedb.org/3/" + (isSeries ? "tv" : "movie") + "/" + tmdbId + "?api_key=" + TMDB_API_KEY;
+    const endpoint = isSeries ? "tv" : "movie";
+    const url = "https://api.themoviedb.org/3/" + endpoint + "/" + tmdbId + "?api_key=" + TMDB_API_KEY;
+    console.log("[VixSrc] Fetching TMDB details from: " + url);
     try {
-      const r = yield fetch(url);
-      const d = yield r.json();
-      if (isSeries) return { title: d.name, year: d.first_air_date ? parseInt(d.first_air_date.split("-")[0]) : 0 };
-      return { title: d.title, year: d.release_date ? parseInt(d.release_date.split("-")[0]) : 0 };
-    } catch (e) {
-      console.log("[VixSrc] TMDB failed: " + e.message);
+      const response = yield fetch(url);
+      const data = yield response.json();
+      if (isSeries) return { title: data.name, year: data.first_air_date ? parseInt(data.first_air_date.split("-")[0]) : 0 };
+      return { title: data.title, year: data.release_date ? parseInt(data.release_date.split("-")[0]) : 0 };
+    } catch (error) {
+      console.log("[VixSrc] TMDB request failed: " + error.message);
       return null;
     }
   });
@@ -58,36 +60,39 @@ function between(str, start, end) {
 
 function onSettings() { return []; }
 
-function getStreams(tmdbId, type, season, episode) {
+function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
-    const tmdb = yield getTmdbDetails(tmdbId, type);
-    if (!tmdb) return [];
-
+    const tmdbDetails = yield getTmdbDetails(tmdbId, type);
+    if (!tmdbDetails) return [];
+    const { title, year } = tmdbDetails;
+    const isSeries = type === "series" || type === "tv";
     const isMovie = type === "movie";
+
     const apiUrl = isMovie
       ? "https://vixsrc.to/api/movie/" + tmdbId + "?lang=en"
       : "https://vixsrc.to/api/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1) + "?lang=en";
 
-    console.log("[VixSrc] API: " + apiUrl);
+    console.log("[VixSrc] API Request URL: " + apiUrl);
 
     const apiText = yield fetchText(apiUrl, {
       headers: { "Referer": "https://vixsrc.to", "X-Requested-With": "XMLHttpRequest" }
     });
-    if (!apiText) return [];
+    if (!apiText) { console.log("[VixSrc] API failed: No response"); return []; }
 
     let apiData;
-    try { apiData = JSON.parse(apiText); } catch (e) { return []; }
+    try { apiData = JSON.parse(apiText); }
+    catch (e) { console.log("[VixSrc] API returned invalid JSON"); return []; }
 
     const embedPath = String(apiData.src || "").replace(/^\//, "");
     if (!embedPath) { console.log("[VixSrc] No embed path in API response"); return []; }
 
     const embedUrl = "https://vixsrc.to/" + embedPath;
-    console.log("[VixSrc] Embed: " + embedUrl);
+    console.log("[VixSrc] Embed URL: " + embedUrl);
 
     const embedHtml = yield fetchText(embedUrl, {
       headers: { "Referer": "https://vixsrc.to" }
     });
-    if (!embedHtml) return [];
+    if (!embedHtml) { console.log("[VixSrc] Embed fetch failed"); return []; }
 
     const videoSection    = embedHtml.split("window.video = {")[1] || "";
     const videoId         = between(videoSection, "id: '", "'");
@@ -96,13 +101,13 @@ function getStreams(tmdbId, type, season, episode) {
     const expires         = between(playlistSection, "'expires': '", "'");
 
     if (!videoId || !token || !expires) {
-      console.log("[VixSrc] Player params not found — videoId=" + !!videoId + " token=" + !!token + " expires=" + !!expires);
+      console.log("[VixSrc] Player params not found (videoId=" + !!videoId + " token=" + !!token + " expires=" + !!expires + ")");
       return [];
     }
 
-    // CRITICAL: use the page's own masterPlaylist URL as the base.
-    // Some titles have ?b=1 baked in; others don't. Hardcoding a base
-    // and adding b=1 caused 403s on movies and some TV.
+    // CRITICAL: use the page's own masterPlaylist URL as the base — some titles
+    // have ?b=1 baked in, others don't. Hardcoding a base + always appending
+    // b=1 caused 403s on movies and some TV in MaxStream.
     const masterUrl = between(playlistSection, "url: '", "'") || ("https://vixsrc.to/playlist/" + videoId);
 
     const query = [
@@ -116,16 +121,25 @@ function getStreams(tmdbId, type, season, episode) {
     const streamUrl = masterUrl + separator + query.join("&");
     console.log("[VixSrc] Playlist: " + streamUrl);
 
-    const seTag = isMovie
-      ? ""
-      : " S" + String(season || 1).padStart(2, "0") + "E" + String(episode || 1).padStart(2, "0");
-    const titleLine = tmdb.title + " (" + tmdb.year + ")" + seTag;
-    const description = titleLine + "\nVixSrc • HLS";
+    // ---- Description — same multi-line format as 4KHDHub ----
+    const seSuffix = isSeries && season && episode
+      ? " S" + String(season).padStart(2, "0") + "E" + String(episode).padStart(2, "0")
+      : "";
+    const titleLine = title + " (" + year + ")" + seSuffix;
+
+    const tagParts = ["VixSrc", "HLS", "H.264"];
+    const tagLine = tagParts.join(" • ");
+
+    const lines = [titleLine];
+    if (tagLine) lines.push(tagLine);
+    const description = lines.join("\n");
+
+    const baseName = "VixSrc";
 
     return [{
-      name: "VixSrc",
+      name: baseName,
       title: description,
-      size: "Auto",
+      size: description,
       description: description,
       url: streamUrl,
       headers: { "Referer": "https://vixsrc.to/", "Origin": "https://vixsrc.to" },

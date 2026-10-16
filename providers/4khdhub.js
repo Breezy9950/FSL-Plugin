@@ -1,5 +1,4 @@
 "use strict";
-
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
 var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
@@ -9,25 +8,36 @@ var __propIsEnum = Object.prototype.propertyIsEnumerable;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __spreadValues = (a, b) => {
   for (var prop in b || (b = {}))
-    if (__hasOwnProp.call(b, prop)) __defNormalProp(a, prop, b[prop]);
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
   if (__getOwnPropSymbols)
     for (var prop of __getOwnPropSymbols(b)) {
-      if (__propIsEnum.call(b, prop)) __defNormalProp(a, prop, b[prop]);
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
     }
   return a;
 };
 var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
-    var fulfilled = (value) => { try { step(generator.next(value)); } catch (e) { reject(e); } };
-    var rejected = (value) => { try { step(generator.throw(value)); } catch (e) { reject(e); } };
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
     var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
     step((generator = generator.apply(__this, __arguments)).next());
   });
 };
-
-var cheerio = require("cheerio-without-node-native");
-
 var BASE_URL = "https://4khdhub.one";
 var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
@@ -77,7 +87,10 @@ function getTmdbDetails(tmdbId, type) {
       const data = yield response.json();
       if (isSeries) return { title: data.name, year: data.first_air_date ? parseInt(data.first_air_date.split("-")[0]) : 0 };
       return { title: data.title, year: data.release_date ? parseInt(data.release_date.split("-")[0]) : 0 };
-    } catch (error) { return null; }
+    } catch (error) {
+      console.log(`[4KHDHub] TMDB request failed: ${error.message}`);
+      return null;
+    }
   });
 }
 function atob(input) {
@@ -112,13 +125,19 @@ function levenshteinDistance(s, t) {
 function parseBytes(val) {
   if (typeof val === "number") return val;
   if (!val) return 0;
-  const match = String(val).match(/([\d.]+)\s*(GB|MB|KB|TB)/i);
+  const match = val.match(/^([0-9.]+)\s*([a-zA-Z]+)$/);
   if (!match) return 0;
-  const mult = { GB: 1024 ** 3, MB: 1024 ** 2, KB: 1024, TB: 1024 ** 4 };
-  return parseFloat(match[1]) * (mult[match[2].toUpperCase()] || 0);
+  const num = parseFloat(match[1]);
+  const unit = match[2].toLowerCase();
+  let multiplier = 1;
+  if (unit.indexOf("k") === 0) multiplier = 1024;
+  else if (unit.indexOf("m") === 0) multiplier = 1024 * 1024;
+  else if (unit.indexOf("g") === 0) multiplier = 1024 * 1024 * 1024;
+  else if (unit.indexOf("t") === 0) multiplier = 1024 * 1024 * 1024 * 1024;
+  return num * multiplier;
 }
 function formatBytes(val) {
-  if (!val || val === 0) return "0 B";
+  if (val === 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   let i = Math.floor(Math.log(val) / Math.log(k));
@@ -127,7 +146,7 @@ function formatBytes(val) {
 }
 
 // ============================================================
-// SETTINGS — Sort only
+// SETTINGS
 // ============================================================
 function onSettings() {
   return [
@@ -154,15 +173,16 @@ function resolveSettings(input) {
     if (settings) {
       let rawSort = settings.sort || settings.sortBy || settings.sort_by || "";
       if (typeof rawSort === "object" && rawSort !== null) rawSort = rawSort.value || rawSort.key || "";
-      const norm = String(rawSort).toLowerCase().trim();
-      if (norm === "size" || norm === "largest") s.sortBy = "size";
+      const normSort = String(rawSort).toLowerCase().trim();
+      if (normSort === "size" || normSort === "largest") s.sortBy = "size";
+      else s.sortBy = "quality";
     }
-  } catch (e) {}
+  } catch (e) { console.log(`[4KHDHub] settings parse error: ${e.message}`); }
   return s;
 }
 
 // ============================================================
-// RELEASE INFO PARSER
+// RELEASE INFO
 // ============================================================
 function parseReleaseInfo(releaseTitle) {
   const t = String(releaseTitle || "");
@@ -193,15 +213,14 @@ function parseReleaseInfo(releaseTitle) {
   return info;
 }
 
-// ============================================================
-// SEARCH — HTML (original working method)
-// ============================================================
+var cheerio = require("cheerio-without-node-native");
 function fetchPageUrl(name, year, isSeries) {
   return __async(this, null, function* () {
     const domain = yield fetchLatestDomain();
     const searchUrl = `${domain}/?s=${encodeURIComponent(name + " " + year)}`;
+    console.log(`[4KHDHub] Search Request URL: ${searchUrl}`);
     const html = yield fetchText(searchUrl);
-    if (!html) return null;
+    if (!html) { console.log("[4KHDHub] Search failed: No HTML response"); return null; }
     const $ = cheerio.load(html);
     const targetType = isSeries ? "Series" : "Movies";
     const matchingCards = $(".movie-card").filter((_, el) => {
@@ -222,10 +241,7 @@ function fetchPageUrl(name, year, isSeries) {
     return matchingCards.length > 0 ? matchingCards[0] : null;
   });
 }
-
-// ============================================================
-// REDIRECT
-// ============================================================
+var cheerio2 = require("cheerio-without-node-native");
 function resolveRedirectUrl(redirectUrl) {
   return __async(this, null, function* () {
     if (redirectUrl.includes("hubcloud.") || redirectUrl.includes("hubdrive.")) return redirectUrl;
@@ -240,7 +256,7 @@ function resolveRedirectUrl(redirectUrl) {
       const step4 = atob(step3);
       const redirectData = JSON.parse(step4);
       if (redirectData && redirectData.o) return atob(redirectData.o);
-    } catch (e) {}
+    } catch (e) { console.log(`[4KHDHub] Error resolving redirect: ${e.message}`); }
     return redirectUrl;
   });
 }
@@ -277,7 +293,7 @@ function extractSourceResults($, el) {
       if (resolvedDrive) {
         const hubDriveHtml = yield fetchText(resolvedDrive);
         if (hubDriveHtml) {
-          const $2 = cheerio.load(hubDriveHtml);
+          const $2 = cheerio2.load(hubDriveHtml);
           const innerCloudLink = $2('a:contains("HubCloud")').attr("href") || $2("a").filter((_, a) => {
             const text = $2(a).text();
             const href = $2(a).attr("href") || "";
@@ -290,26 +306,6 @@ function extractSourceResults($, el) {
     return null;
   });
 }
-
-// ============================================================
-// PIXELDRAIN — the /api/file/ rewrite
-// ============================================================
-function pixelDrainExtractor(link) {
-  try {
-    const u = new URL(link);
-    const baseUrl = u.protocol + "//" + u.hostname;
-    const fileId = (link.match(/(?:file|u)\/([A-Za-z0-9]+)/) || [])[1] || link.split("/").pop();
-    if (!fileId) return [{ source: "PixelDrain", url: link }];
-    const finalUrl = link.indexOf("?download") >= 0 ? link : baseUrl + "/api/file/" + fileId + "?download";
-    return [{ source: "PixelDrain", url: finalUrl }];
-  } catch (e) {
-    return [{ source: "PixelDrain", url: link }];
-  }
-}
-
-// ============================================================
-// HCLOUD PAGE — grab FSL + Pixeldrain buttons only
-// ============================================================
 function extractHubCloud(hubCloudUrl, baseMeta) {
   return __async(this, null, function* () {
     if (!hubCloudUrl) return [];
@@ -320,7 +316,7 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
     const finalLinksUrl = redirectUrlMatch[1];
     const linksHtml = yield fetchText(finalLinksUrl, { headers: { Referer: hubCloudUrl } });
     if (!linksHtml) return [];
-    const $ = cheerio.load(linksHtml);
+    const $ = cheerio2.load(linksHtml);
     const results = [];
     const sizeText = $("#size").text();
     const titleText = $("title").text().trim();
@@ -329,50 +325,73 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     $("a").each((_, el) => {
-      const href = $(el).attr("href") || "";
-      const cls = $(el).attr("class") || "";
-      const id = $(el).attr("id") || "";
       const text = ($(el).text() || "").trim();
+      const href = $(el).attr("href") || "";
+      const id = $(el).attr("id") || "";
       if (!href || href.startsWith("#") || href.startsWith("/")) return;
-
-      // Pixeldrain
-      if (href.includes("pixeldra")) {
-        const pd = pixelDrainExtractor(href);
-        for (const r of pd) results.push({ source: r.source, url: r.url, meta: currentMeta, headers: {} });
-        return;
-      }
-
-      // FSL / Direct R2
-      if (cls.includes("btn-success") || id === "fsl" || /\bFSL\b/i.test(text) || href.includes("r2.cloudflarestorage.com")) {
-        let label = "FSL";
-        if (href.includes("r2.dev") || href.includes("r2.cloudflarestorage.com")) label = "Direct R2";
-        else if (href.includes("workers.dev")) label = "FSL";
-        results.push({ source: label, url: href, meta: currentMeta, headers: {} });
+      if (id === "fsl" || /\bFSL\b/i.test(text) || href.includes("r2.cloudflarestorage.com")) {
+        results.push({ source: "FSL", url: href, meta: currentMeta, headers: {} });
         return;
       }
     });
     return results;
   });
 }
-
-// ============================================================
-// MAIN
-// ============================================================
+function extractHblinks(hblinksUrl, baseMeta, depth) {
+  depth = depth || 0;
+  return __async(this, null, function* () {
+    if (!hblinksUrl || depth > 2) return [];
+    try {
+      const html = yield fetchText(hblinksUrl, { headers: { Referer: hblinksUrl } });
+      if (!html) return [];
+      const $ = cheerio2.load(html);
+      const links = [...new Set($("h3 a, h5 a, div.entry-content p a, div.entry-content a").map((_, el) => $(el).attr("href")).get().filter(Boolean))];
+      const results = [];
+      for (const rawLink of links) {
+        try {
+          const absoluteLink = new URL(rawLink, hblinksUrl).toString();
+          const resolvedLink = yield resolveRedirectUrl(absoluteLink);
+          const link = resolvedLink || absoluteLink;
+          const hostname = new URL(link).hostname.toLowerCase();
+          if (hostname.includes("hblinks") || hostname.includes("hubstream.dad")) {
+            results.push(...(yield extractHblinks(link, baseMeta, depth + 1)));
+          } else if (hostname.includes("hubcloud")) {
+            results.push(...(yield extractHubCloud(link, baseMeta)));
+          } else if (hostname.includes("hubdrive")) {
+            const driveHtml = yield fetchText(link, { headers: { Referer: hblinksUrl } });
+            if (driveHtml) {
+              const $drive = cheerio2.load(driveHtml);
+              const cloudLink = $drive("a").filter((_, a) => {
+                const text = $drive(a).text();
+                const href = $drive(a).attr("href") || "";
+                return text.includes("HubCloud") || href.includes("hubcloud.") || href.includes("hubcloud/");
+              }).attr("href");
+              if (cloudLink) results.push(...(yield extractHubCloud(new URL(cloudLink, link).toString(), baseMeta)));
+            }
+          } else if (/\.(m3u8|mpd|mp4|mkv)(?:$|\?)/i.test(link)) {
+            results.push({ source: "Hblinks Direct", url: link, meta: baseMeta });
+          }
+        } catch (e) {}
+      }
+      return results;
+    } catch (e) { return []; }
+  });
+}
+var cheerio3 = require("cheerio-without-node-native");
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
     const resolved = resolveSettings(settings);
+    console.log(`[4KHDHub] Sort: ${resolved.sortBy}`);
 
     const tmdbDetails = yield getTmdbDetails(tmdbId, type);
     if (!tmdbDetails) return [];
     const { title, year } = tmdbDetails;
     const isSeries = type === "series" || type === "tv";
-
     const pageUrl = yield fetchPageUrl(title, year, isSeries);
-    if (!pageUrl) return [];
+    if (!pageUrl) { console.log("[4KHDHub] Page not found"); return []; }
     const html = yield fetchText(pageUrl);
     if (!html) return [];
-    const $ = cheerio.load(html);
-
+    const $ = cheerio3.load(html);
     const itemsToProcess = [];
     if (isSeries && season && episode) {
       const seasonStr = "S" + String(season).padStart(2, "0");
@@ -385,6 +404,7 @@ function getStreams(tmdbId, type, season, episode, settings) {
     } else {
       $(".download-item").each((_, el) => { itemsToProcess.push(el); });
     }
+    console.log(`[4KHDHub] Processing ${itemsToProcess.length} items`);
 
     const seSuffix = isSeries && season && episode ? ` S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}` : "";
     const titleLine = `${title} (${year})${seSuffix}`;
@@ -393,7 +413,9 @@ function getStreams(tmdbId, type, season, episode, settings) {
       try {
         const sourceResult = yield extractSourceResults($, item);
         if (!sourceResult || !sourceResult.url) return [];
-        const extractedLinks = yield extractHubCloud(sourceResult.url, sourceResult.meta);
+        let extractedLinks;
+        if (sourceResult.extractor === "hblinks") extractedLinks = yield extractHblinks(sourceResult.url, sourceResult.meta);
+        else extractedLinks = yield extractHubCloud(sourceResult.url, sourceResult.meta);
 
         return extractedLinks.map((link) => {
           const height = sourceResult.meta.height || 0;
@@ -420,7 +442,7 @@ function getStreams(tmdbId, type, season, episode, settings) {
 
           const baseName = qualityShort ? `4KHDHub ${qualityShort}` : "4KHDHub";
 
-          const obj = {
+          const streamObj = {
             name: baseName,
             title: description,
             size: description,
@@ -430,10 +452,15 @@ function getStreams(tmdbId, type, season, episode, settings) {
             __sb: link.meta.bytes || 0,
             behaviorHints: { bingeGroup: `4khdhub-${link.source}` }
           };
-          if (link.headers && Object.keys(link.headers).length) obj.headers = link.headers;
-          return obj;
+          if (link.headers && Object.keys(link.headers).length > 0) {
+            streamObj.headers = link.headers;
+          }
+          return streamObj;
         });
-      } catch (err) { return []; }
+      } catch (err) {
+        console.log(`[4KHDHub] Item processing error: ${err.message}`);
+        return [];
+      }
     }));
 
     const results = yield Promise.all(streamPromises);
@@ -442,10 +469,12 @@ function getStreams(tmdbId, type, season, episode, settings) {
     const seen = new Set();
     const deduped = [];
     for (const r of flat) {
-      if (seen.has(r.url)) continue;
-      seen.add(r.url);
+      const key = r.url;
+      if (seen.has(key)) continue;
+      seen.add(key);
       deduped.push(r);
     }
+    console.log(`[4KHDHub] After dedupe: ${deduped.length}/${flat.length} kept`);
 
     if (resolved.sortBy === "size") {
       deduped.sort((a, b) => b.__sb - a.__sb);
@@ -468,5 +497,4 @@ function getStreams(tmdbId, type, season, episode, settings) {
     return deduped;
   });
 }
-
 module.exports = { getStreams, onSettings };

@@ -18,17 +18,17 @@
       "contentLanguage": ["en"]
     },
     {
-      "id": "maxstream-vixsrc",
-      "name": "VixSrc",
-      "description": "VixSrc direct HLS (MaxStream port)",
+      "id": "maxstream-videasy",
+      "name": "Videasy",
+      "description": "Videasy direct HLS/DASH (MaxStream port)",
       "version": "1.0.0",
       "author": "Breezy9950",
-      "filename": "providers/vixsrc.js",
+      "filename": "providers/videasy.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
       "hasSettings": false,
       "formats": ["mkv", "mp4"],
-      "logo": "https://www.google.com/s2/favicons?domain=vixsrc.to&sz=128",
+      "logo": "https://www.google.com/s2/favicons?domain=player.videasy.to&sz=128",
       "contentLanguage": ["en"]
     }
   ]

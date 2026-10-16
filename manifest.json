@@ -1,12 +1,12 @@
 {
   "name": "FSL-Plugin",
   "version": "1.0.7",
-  "description": "4KHDHub + HDHub4u + VidFast direct links",
+  "description": "4KHDHub, HDHub4u, and VidFast direct links",
   "scrapers": [
     {
       "id": "4khdhub",
       "name": "4KHDHub",
-      "description": "4KHDHub direct links via search + HubCloud/Hblinks extraction, with preferred-source filtering and quality/size sorting",
+      "description": "4KHDHub direct links via search + HubCloud/Hblinks extraction",
       "version": "1.0.0",
       "author": "Breezy9950",
       "filename": "providers/4khdhub.js",

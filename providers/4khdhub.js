@@ -305,7 +305,6 @@ function extractSourceResults($, el) {
     return null;
   });
 }
-// THIS IS THE EXACT AIO EXTRACTOR YOU PROVIDED
 function extractHubCloud(hubCloudUrl, baseMeta) {
   return __async(this, null, function* () {
     if (!hubCloudUrl) return [];
@@ -324,20 +323,29 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       bytes: parseBytes(sizeText) || baseMeta.bytes,
       title: titleText || baseMeta.title
     });
+    
     $("a").each((_, el) => {
-      const text = $(el).text().trim();
-      const href = $(el).attr("href");
+      const text = ($(el).text() || "").trim();
+      const href = $(el).attr("href") || "";
+      const id = $(el).attr("id") || "";
       if (!href) return;
-      if (text.includes("10Gbps") || text.includes("PixelServer") || href.includes("hubcloud.cx")) {
-        results.push({ source: "HubCloud 10Gbps", url: href, meta: currentMeta });
-      } else if (text.includes("Download File") || href.includes("r2.dev")) {
-        results.push({ source: "Direct R2", url: href, meta: currentMeta });
-      } else if (text.includes("ZipDisk") || href.includes("workers.dev")) {
-        results.push({ source: "ZipDisk Server", url: href, meta: currentMeta });
-      } else if (text.includes("FSL")) {
+
+      // 1. FSL Button
+      if (id === "fsl" || /\bFSL\b/i.test(text) || (href.includes("r2.cloudflarestorage.com") && !href.includes("workers.dev"))) {
         results.push({ source: "FSL", url: href, meta: currentMeta });
+        return;
+      }
+
+      // 2. Direct R2 / Workers
+      if (href.includes("r2.dev") || href.includes("workers.dev") || text.includes("Download File")) {
+        // Filter out the fake ones
+        if (href.includes("hubcloud.cx") || text.includes("10Gbps") || text.includes("PixelServer")) return;
+        
+        results.push({ source: "Direct R2", url: href, meta: currentMeta });
+        return;
       }
     });
+    
     return results;
   });
 }

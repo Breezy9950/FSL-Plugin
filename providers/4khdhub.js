@@ -306,20 +306,9 @@ function extractSourceResults($, el) {
   });
 }
 
-// AIO's PixelDrain extractor
-function pixelDrainExtractor(link) {
-  try {
-    const urlObj = new URL(link);
-    const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`;
-    const fileId = link.match(/(?:file|u)\/([A-Za-z0-9]+)/)?.[1] || link.split("/").pop();
-    if (!fileId) return [{ source: "Pixeldrain", quality: 0, url: link }];
-    const finalUrl = link.includes("?download") ? link : `${baseUrl}/api/file/${fileId}?download`;
-    return [{ source: "Pixeldrain", quality: 0, url: finalUrl }];
-  } catch (e) {
-    return [{ source: "Pixeldrain", quality: 0, url: link }];
-  }
-}
-
+// ============================================================
+// EXACT AIO EXTRACT + PIXELDRAIN RESOLVER
+// ============================================================
 function extractHubCloud(hubCloudUrl, baseMeta) {
   return __async(this, null, function* () {
     if (!hubCloudUrl) return [];
@@ -339,33 +328,44 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     
+    const pixelLinks = [];
+    
+    // EXACT AIO MATCHING
     $("a").each((_, el) => {
       const text = ($(el).text() || "").trim();
       const href = $(el).attr("href") || "";
-      const id = $(el).attr("id") || "";
       if (!href) return;
-
-      // 1. FSL
-      if (id === "fsl" || /\bFSL\b/i.test(text) || (href.includes("r2.cloudflarestorage.com") && !href.includes("workers.dev"))) {
-        results.push({ source: "FSL", url: href, meta: currentMeta });
-        return;
-      }
-
-      // 2. PixelDrain / Pixel
+      
       if (href.includes("pixel.hubcloud.ist") || href.includes("pixeldra")) {
-        const pd = pixelDrainExtractor(href);
-        pd.forEach(p => results.push({ source: "PixelDrain", url: p.url, meta: currentMeta }));
-        return;
-      }
-
-      // 3. Direct R2 (matches r2.dev, workers.dev, and "Download File" text)
-      if (href.includes("r2.dev") || href.includes("workers.dev") || text.includes("Download File")) {
+        pixelLinks.push(href);
+      } else if (text.includes("10Gbps") || text.includes("PixelServer") || href.includes("hubcloud.cx")) {
+        results.push({ source: "HubCloud 10Gbps", url: href, meta: currentMeta });
+      } else if (text.includes("Download File") || href.includes("r2.dev")) {
         results.push({ source: "Direct R2", url: href, meta: currentMeta });
-        return;
+      } else if (text.includes("ZipDisk") || href.includes("workers.dev")) {
+        results.push({ source: "ZipDisk Server", url: href, meta: currentMeta });
+      } else if (text.includes("FSL")) {
+        results.push({ source: "FSL", url: href, meta: currentMeta });
       }
-
-      // 4. Skip HubCloud 10Gbps and ZipDisk (user confirmed they don't work)
     });
+
+    // PIXELDRAIN RESOLVER (PenguPlay style)
+    for (const pLink of pixelLinks) {
+      try {
+        const res = yield fetch(pLink, { headers: { "User-Agent": USER_AGENT } });
+        let finalUrl = res.url;
+        // If it redirected to Pixeldrain, convert to API link
+        if (finalUrl && finalUrl.includes("pixeldrain.com/u/")) {
+          const fileId = finalUrl.split("/u/")[1].split("?")[0];
+          finalUrl = "https://pixeldrain.com/api/file/" + fileId + "?download";
+        }
+        if (finalUrl) {
+          results.push({ source: "PixelDrain", url: finalUrl, meta: currentMeta });
+        }
+      } catch (e) {
+        console.log(`[4KHDHub] PixelDrain fetch failed: ${e.message}`);
+      }
+    }
     
     return results;
   });

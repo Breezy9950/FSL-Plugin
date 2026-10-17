@@ -44,6 +44,11 @@ var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 var domainCache = { url: BASE_URL, ts: 0 };
 
+// We need to pass the User-Agent to the player for Pixeldrain and FSL
+var PLAYER_HEADERS = {
+  "User-Agent": USER_AGENT
+};
+
 function fetchLatestDomain() {
   return __async(this, null, function* () {
     const now = Date.now();
@@ -320,8 +325,6 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     
-    let pixeldrainFound = false;
-
     $("a").each((_, el) => {
       const text = ($(el).text() || "").trim().toLowerCase();
       let href = $(el).attr("href") || "";
@@ -330,21 +333,20 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
 
       // 1. FSL
       if (text.includes("fsl server")) {
-        results.push({ source: "FSL", url: href, meta: currentMeta });
+        if (href.startsWith("//")) href = "https:" + href;
+        href = href.replace(/&amp;/g, "&");
+        results.push({ source: "FSL", url: href, meta: currentMeta, headers: PLAYER_HEADERS });
         return;
       }
 
-      // 2. Pixeldrain (HTML Scrape)
+      // 2. Pixeldrain (Scan HTML for ALL links)
       if (text.includes("pixeldrain") || text.includes("pixelserver")) {
-        if (pixeldrainFound) return;
-        pixeldrainFound = true;
-        
-        // Cloudstream ignores the button href and scans the entire document
-        const match = linksHtml.match(/https?:\/\/pixeldrain\.[a-z]+\/u\/([a-zA-Z0-9]+)/);
-        if (match && match[1]) {
-          const fileId = match[1];
+        // Cloudstream uses findAll, so we use matchAll to get every link
+        const matches = [...linksHtml.matchAll(/https?:\/\/pixeldrain\.[a-z]+\/u\/([a-zA-Z0-9]+)/g)];
+        for (const m of matches) {
+          const fileId = m[1];
           const finalUrl = `https://pixeldrain.dev/api/file/${fileId}?download`;
-          results.push({ source: "Pixeldrain", url: finalUrl, meta: currentMeta });
+          results.push({ source: "Pixeldrain", url: finalUrl, meta: currentMeta, headers: PLAYER_HEADERS });
         }
         return;
       }
@@ -386,7 +388,7 @@ function extractHblinks(hblinksUrl, baseMeta, depth) {
               if (cloudLink) results.push(...(yield extractHubCloud(new URL(cloudLink, link).toString(), baseMeta)));
             }
           } else if (/\.(m3u8|mpd|mp4|mkv)(?:$|\?)/i.test(link)) {
-            results.push({ source: "Hblinks Direct", url: link, meta: baseMeta });
+            results.push({ source: "Hblinks Direct", url: link, meta: baseMeta, headers: PLAYER_HEADERS });
           }
         } catch (e) {}
       }

@@ -218,9 +218,8 @@ function fetchPageUrl(name, year, isSeries) {
   return __async(this, null, function* () {
     const domain = yield fetchLatestDomain();
     const searchUrl = `${domain}/?s=${encodeURIComponent(name + " " + year)}`;
-    console.log(`[4KHDHub] Search Request URL: ${searchUrl}`);
     const html = yield fetchText(searchUrl);
-    if (!html) { console.log("[4KHDHub] Search failed: No HTML response"); return null; }
+    if (!html) { return null; }
     const $ = cheerio.load(html);
     const targetType = isSeries ? "Series" : "Movies";
     const matchingCards = $(".movie-card").filter((_, el) => {
@@ -306,6 +305,7 @@ function extractSourceResults($, el) {
     return null;
   });
 }
+// THIS IS THE EXACT AIO EXTRACTOR YOU PROVIDED
 function extractHubCloud(hubCloudUrl, baseMeta) {
   return __async(this, null, function* () {
     if (!hubCloudUrl) return [];
@@ -325,13 +325,17 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     $("a").each((_, el) => {
-      const text = ($(el).text() || "").trim();
-      const href = $(el).attr("href") || "";
-      const id = $(el).attr("id") || "";
-      if (!href || href.startsWith("#") || href.startsWith("/")) return;
-      if (id === "fsl" || /\bFSL\b/i.test(text) || href.includes("r2.cloudflarestorage.com")) {
-        results.push({ source: "FSL", url: href, meta: currentMeta, headers: {} });
-        return;
+      const text = $(el).text().trim();
+      const href = $(el).attr("href");
+      if (!href) return;
+      if (text.includes("10Gbps") || text.includes("PixelServer") || href.includes("hubcloud.cx")) {
+        results.push({ source: "HubCloud 10Gbps", url: href, meta: currentMeta });
+      } else if (text.includes("Download File") || href.includes("r2.dev")) {
+        results.push({ source: "Direct R2", url: href, meta: currentMeta });
+      } else if (text.includes("ZipDisk") || href.includes("workers.dev")) {
+        results.push({ source: "ZipDisk Server", url: href, meta: currentMeta });
+      } else if (text.includes("FSL")) {
+        results.push({ source: "FSL", url: href, meta: currentMeta });
       }
     });
     return results;

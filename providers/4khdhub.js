@@ -40,7 +40,7 @@ var __async = (__this, __arguments, generator) => {
 };
 var BASE_URL = "https://4khdhub.one";
 var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
-var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
+var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var DOMAINS_URL = "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/domains.json";
 var domainCache = { url: BASE_URL, ts: 0 };
 
@@ -145,9 +145,6 @@ function formatBytes(val) {
   return parseFloat((val / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
-// ============================================================
-// SETTINGS
-// ============================================================
 function onSettings() {
   return [
     {
@@ -181,9 +178,6 @@ function resolveSettings(input) {
   return s;
 }
 
-// ============================================================
-// RELEASE INFO
-// ============================================================
 function parseReleaseInfo(releaseTitle) {
   const t = String(releaseTitle || "");
   const info = { source: "", codec: "", hdr: "", dv: false, audio: [] };
@@ -306,9 +300,7 @@ function extractSourceResults($, el) {
   });
 }
 
-// ============================================================
-// EXACT AIO EXTRACT + PIXELDRAIN RESOLVER
-// ============================================================
+// EXACT CLOUDSTREAM LOGIC: FSL + PIXELDRAIN (HTML SCRAPE)
 function extractHubCloud(hubCloudUrl, baseMeta) {
   return __async(this, null, function* () {
     if (!hubCloudUrl) return [];
@@ -328,48 +320,40 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
       title: titleText || baseMeta.title
     });
     
-    const pixelLinks = [];
-    
-    // EXACT AIO MATCHING
+    let pixeldrainFound = false;
+
     $("a").each((_, el) => {
-      const text = ($(el).text() || "").trim();
-      const href = $(el).attr("href") || "";
+      const text = ($(el).text() || "").trim().toLowerCase();
+      let href = $(el).attr("href") || "";
+      const id = $(el).attr("id") || "";
       if (!href) return;
-      
-      if (href.includes("pixel.hubcloud.ist") || href.includes("pixeldra")) {
-        pixelLinks.push(href);
-      } else if (text.includes("10Gbps") || text.includes("PixelServer") || href.includes("hubcloud.cx")) {
-        results.push({ source: "HubCloud 10Gbps", url: href, meta: currentMeta });
-      } else if (text.includes("Download File") || href.includes("r2.dev")) {
-        results.push({ source: "Direct R2", url: href, meta: currentMeta });
-      } else if (text.includes("ZipDisk") || href.includes("workers.dev")) {
-        results.push({ source: "ZipDisk Server", url: href, meta: currentMeta });
-      } else if (text.includes("FSL")) {
+
+      // 1. FSL
+      if (text.includes("fsl server")) {
         results.push({ source: "FSL", url: href, meta: currentMeta });
+        return;
+      }
+
+      // 2. Pixeldrain (HTML Scrape)
+      if (text.includes("pixeldrain") || text.includes("pixelserver")) {
+        if (pixeldrainFound) return;
+        pixeldrainFound = true;
+        
+        // Cloudstream ignores the button href and scans the entire document
+        const match = linksHtml.match(/https?:\/\/pixeldrain\.[a-z]+\/u\/([a-zA-Z0-9]+)/);
+        if (match && match[1]) {
+          const fileId = match[1];
+          const finalUrl = `https://pixeldrain.dev/api/file/${fileId}?download`;
+          results.push({ source: "Pixeldrain", url: finalUrl, meta: currentMeta });
+        }
+        return;
       }
     });
-
-    // PIXELDRAIN RESOLVER (PenguPlay style)
-    for (const pLink of pixelLinks) {
-      try {
-        const res = yield fetch(pLink, { headers: { "User-Agent": USER_AGENT } });
-        let finalUrl = res.url;
-        // If it redirected to Pixeldrain, convert to API link
-        if (finalUrl && finalUrl.includes("pixeldrain.com/u/")) {
-          const fileId = finalUrl.split("/u/")[1].split("?")[0];
-          finalUrl = "https://pixeldrain.com/api/file/" + fileId + "?download";
-        }
-        if (finalUrl) {
-          results.push({ source: "PixelDrain", url: finalUrl, meta: currentMeta });
-        }
-      } catch (e) {
-        console.log(`[4KHDHub] PixelDrain fetch failed: ${e.message}`);
-      }
-    }
     
     return results;
   });
 }
+
 function extractHblinks(hblinksUrl, baseMeta, depth) {
   depth = depth || 0;
   return __async(this, null, function* () {

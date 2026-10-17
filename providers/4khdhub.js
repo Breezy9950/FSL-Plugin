@@ -336,11 +336,8 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
         return;
       }
 
-      // 2. Direct R2 / Workers
-      if (href.includes("r2.dev") || href.includes("workers.dev") || text.includes("Download File")) {
-        // Filter out the fake ones
-        if (href.includes("hubcloud.cx") || text.includes("10Gbps") || text.includes("PixelServer")) return;
-        
+      // 2. Direct R2 (r2.dev only, NO workers.dev)
+      if (href.includes("r2.dev")) {
         results.push({ source: "Direct R2", url: href, meta: currentMeta });
         return;
       }

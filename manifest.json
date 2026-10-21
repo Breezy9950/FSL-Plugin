@@ -1,6 +1,6 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "4KHDHub, HDHub4u, and VidFast direct links",
   "scrapers": [
     {

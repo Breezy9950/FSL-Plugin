@@ -1,6 +1,6 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "4KHDHub, HDHub4u, and VidFast direct links",
   "scrapers": [
     {
@@ -36,7 +36,7 @@
       "name": "Anikoto",
       "description": "Anikoto streams using pure client-side universal mapping (TMDB, TVDB, AniList, MAL, IMDb) with MegaPlay and VidTube extraction.",
       "version": "1.0.0",
-      "author": "YourName",
+      "author": "Breezy9950",
       "filename": "providers/anikoto.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,

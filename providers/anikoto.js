@@ -263,7 +263,11 @@ async function mapperLookup(rawId, season = 1, episode = 1) {
   const query = `query($search:String){Page(perPage:20){media(search:$search,type:ANIME){id idMal title{romaji english} startDate{year month day} endDate{year month day} episodes streamingEpisodes{title}}}}`;
   const aniRes = await getJson(ANILIST_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { 
+      "Content-Type": "application/json", 
+      "Accept": "application/json", 
+      "User-Agent": UA 
+    },
     body: JSON.stringify({ query, variables: { search: showTitle } })
   });
 

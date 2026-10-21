@@ -266,7 +266,9 @@ async function mapperLookup(rawId, season = 1, episode = 1) {
     headers: { 
       "Content-Type": "application/json", 
       "Accept": "application/json", 
-      "User-Agent": UA 
+      "User-Agent": UA,
+      "Origin": "https://anilist.co",
+      "Referer": "https://anilist.co/"
     },
     body: JSON.stringify({ query, variables: { search: showTitle } })
   });

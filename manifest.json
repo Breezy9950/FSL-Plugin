@@ -1,7 +1,7 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.2.4",
-  "description": "4KHDHub, HDHub4u, and VidFast direct links",
+  "version": "1.3.0",
+  "description": "4KHDHub, HDHub4u, VidFast, and VidLink direct links",
   "scrapers": [
     {
       "id": "4khdhub",
@@ -32,17 +32,18 @@
       "contentLanguage": ["en"]
     },
     {
-      "id": "anikoto",
-      "name": "Anikoto",
-      "description": "Anikoto streams using pure client-side universal mapping (TMDB, TVDB, AniList, MAL, IMDb) with MegaPlay and VidTube extraction.",
-      "version": "1.0.2",
+      "id": "vidlink",
+      "name": "VidLink",
+      "description": "VidLink.pro direct HLS via local AES-256-CBC encryption. Movies, TV, and anime (mal: ID prefix). No scraping, no external decryption service.",
+      "version": "1.0.0",
       "author": "Breezy9950",
-      "filename": "providers/anikoto.js",
+      "filename": "providers/vidlink.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
-      "formats": ["m3u8", "mp4"],
-      "logo": "https://www.google.com/s2/favicons?domain=anikototv.to&sz=128",
+      "hasSettings": true,
+      "formats": ["m3u8"],
+      "logo": "https://www.google.com/s2/favicons?domain=vidlink.pro&sz=128",
       "contentLanguage": ["en", "ja"]
-    }  
+    }
   ]
 }

@@ -7,9 +7,17 @@
  *   - wecollege ignores title, imdbId, tvdbId params entirely
  *
  * Nuvio already provides TMDB id + TVDB S/E, so no conversion is needed.
+ *
+ * 12 lanes raced in parallel. 4K-capable lanes (miami/boise) start
+ * immediately; others wait PRIORITY_HEAD_START_MS. First lane to return
+ * valid sources wins, all others are aborted.
+ *
+ * Dedup keeps the HIGHEST quality label per URL — Miami returns
+ * 1080p/720p/480p/2160p all on the same master.m3u8, so the max label
+ * (2160p) is what ships.
  */
 
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+const UA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const ENC_DEC   = "https://enc-dec.app/api";
 const SEED_API  = "https://api.wecollege.net/seed";
 const SRC_API   = "https://api.wecollege.net";
@@ -20,7 +28,7 @@ const SERVERS = [
   "miami","boise","vegas","phoenix","atlanta","seattle","portland",
   "oakland","dallas","tampa","orlando","reno"
 ];
-const FOUR_K_SERVERS = new Set(["miami","boise"]);
+const FOUR_K_SERVERS         = new Set(["miami","boise"]);
 const PRIORITY_HEAD_START_MS = 400;
 
 const SERVER_LABELS = {
@@ -38,6 +46,7 @@ function invisiblePrefix(i) {
   if (i < 256) return String.fromCodePoint(0xE0100 + (i - 16));
   return "";
 }
+
 function rankOf(q) {
   const n = parseInt(String(q).replace(/\D/g,""),10) || 0;
   if (n >= 4320) return 1; if (n >= 2160) return 2;
@@ -66,7 +75,9 @@ async function fetchT(url, opts = {}, ms = TIMEOUT, externalSignal) {
 }
 
 async function getSeed(tmdbId) {
-  const r = await fetchT(SEED_API + "?mediaId=" + tmdbId, { headers: { "Origin": ORIGIN, "Referer": ORIGIN + "/", "Accept": "application/json" } });
+  const r = await fetchT(SEED_API + "?mediaId=" + tmdbId, {
+    headers: { "Origin": ORIGIN, "Referer": ORIGIN + "/", "Accept": "application/json" }
+  });
   if (r.status !== 200) return null;
   try {
     const j = JSON.parse(r.text);
@@ -86,7 +97,9 @@ async function fetchSources(srv, mediaType, tmdbId, season, episode, seed, signa
     "&seed=" + seed;
   if (mediaType === "tv") url += "&episodeId=" + episode + "&seasonId=" + season;
 
-  const r = await fetchT(url, { headers: { "Origin": ORIGIN, "Referer": ORIGIN + "/", "Accept": "*/*" } }, TIMEOUT, signal);
+  const r = await fetchT(url, {
+    headers: { "Origin": ORIGIN, "Referer": ORIGIN + "/", "Accept": "*/*" }
+  }, TIMEOUT, signal);
   if (r.status !== 200 || r.text.length < 30) return null;
   return r.text;
 }
@@ -159,28 +172,36 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
     if (!winner) { log("all " + SERVERS.length + " servers failed"); return []; }
 
     const winnerLabel = labelFor(winner.srv);
-    const titleLine = "Videasy " + mediaType.toUpperCase() +
-      (mediaType === "tv" ? " S" + String(s).padStart(2,"0") + "E" + String(e).padStart(2,"0") : "") +
-      " • " + winnerLabel;
+    const titleLine = mediaType === "movie"
+      ? "Movie"
+      : "S" + String(s).padStart(2,"0") + "E" + String(e).padStart(2,"0");
 
-    const seen = new Set();
-    const built = [];
+    // Dedupe by URL, keeping HIGHEST quality label per URL.
+    // Miami returns 1080p/720p/480p/2160p all pointing to the same master.m3u8 —
+    // the naive first-seen dedup would keep 1080p and drop 2160p.
+    const urlMap = new Map();
     for (const src of winner.result.sources) {
       if (!src || !src.url) continue;
       const url = String(src.url);
-      if (seen.has(url)) continue;
-      seen.add(url);
-
       const q = String(src.quality || "auto");
+      const rank = rankOf(q);
+      const prev = urlMap.get(url);
+      if (!prev || rank < prev.rank) {
+        urlMap.set(url, { url, quality: q, rank });
+      }
+    }
+
+    const built = [];
+    for (const { url, quality } of urlMap.values()) {
       built.push({
-        name: "Videasy " + q + " • " + winnerLabel,
-        title: titleLine + "\n" + "Videasy " + q + " • " + winnerLabel,
+        name: winnerLabel + " " + quality,
+        title: titleLine + "\n" + winnerLabel + " " + quality,
         url: url,
-        quality: q,
+        quality: quality,
         headers: { "User-Agent": UA, "Referer": ORIGIN + "/" },
         provider: "videasy",
         type: "hls",
-        __rank: rankOf(q)
+        __rank: rankOf(quality)
       });
     }
 

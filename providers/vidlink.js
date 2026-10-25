@@ -1,10 +1,7 @@
 /*
- * VidLink.pro — standalone Nuvio provider.
- *
-/*
  * Videasy — standalone Nuvio provider.
  * TMDB -> seed -> wecollege sources -> decrypt -> m3u8 URLs.
- * 12 servers, includes 4K on some content.
+ * Uses invisible unicode prefixes so Nuvio sorts 2160p/1440p/1080p/720p correctly.
  */
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -19,6 +16,36 @@ const SERVERS = [
   "miami", "boise", "vegas", "reno", "oakland", "seattle",
   "phoenix", "atlanta", "portland", "dallas", "tampa", "orlando"
 ];
+
+/*
+ * Invisible unicode prefix map — codepoints in ASCENDING order
+ * correspond to DESCENDING quality. Nuvio's alphabetical sort
+ * (or any string sort) then produces 2160p > 1440p > 1080p > ...
+ *
+ *   U+200B ZWSP   8203  → 4320p (8K)
+ *   U+200C ZWNJ   8204  → 2160p (4K)
+ *   U+200D ZWJ    8205  → 1440p (2K)
+ *   U+200E LRM    8206  → 1080p
+ *   U+200F RLM    8207  → 720p
+ *   U+2060 WJ     8288  → 480p
+ *   U+2061        8289  → 360p
+ *   U+2062        8290  → 240p
+ *   U+2063        8291  → 144p
+ *   U+2064        8292  → auto/unknown
+ */
+function invisiblePrefix(q) {
+  const num = parseInt(String(q).replace(/\D/g, ""), 10) || 0;
+  if (num >= 4320) return "\u200B";
+  if (num >= 2160) return "\u200C";
+  if (num >= 1440) return "\u200D";
+  if (num >= 1080) return "\u200E";
+  if (num >= 720)  return "\u200F";
+  if (num >= 480)  return "\u2060";
+  if (num >= 360)  return "\u2061";
+  if (num >= 240)  return "\u2062";
+  if (num >= 144)  return "\u2063";
+  return "\u2064";
+}
 
 function log(x){ console.log("[Videasy] " + x); }
 function doubleEnc(s){ return encodeURIComponent(encodeURIComponent(s)); }
@@ -90,6 +117,10 @@ async function decrypt(encText, tmdbId, seed) {
   } catch(e) { return null; }
 }
 
+function sortKey(q) {
+  return parseInt(String(q).replace(/\D/g, ""), 10) || 0;
+}
+
 async function getStreams(tmdbId, mediaType, season, episode, settings){
   try {
     mediaType = String(mediaType || "tv").toLowerCase();
@@ -102,7 +133,6 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
 
     const meta = await tmdbMeta(id, mediaType);
     if (!meta || !meta.title) { log("tmdb meta failed"); return []; }
-    log("meta: " + meta.title + " (" + meta.year + ") imdb=" + (meta.imdbId || "-"));
 
     const seed = await getSeed(id);
     if (!seed) { log("seed failed"); return []; }
@@ -116,18 +146,24 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
       const result = await decrypt(enc, id, seed);
       if (!result || !Array.isArray(result.sources) || !result.sources.length) continue;
 
-      const streams = result.sources
+      // Plugin-side sort: highest quality first (in case array order is respected)
+      const sorted = result.sources
         .filter(src => src && src.url)
-        .sort((a, b) => parseInt(b.quality || 0) - parseInt(a.quality || 0))
-        .map(src => ({
+        .sort((a, b) => sortKey(b.quality) - sortKey(a.quality));
+
+      const streams = sorted.map(src => {
+        const q = String(src.quality || "auto");
+        // Invisible prefix forces Nuvio's alphabetical sort to match quality order
+        return {
           name: "Videasy",
-          title: "Videasy " + (src.quality || "auto") + " · " + srv,
+          title: invisiblePrefix(q) + "Videasy " + q + " · " + srv,
           url: String(src.url),
-          quality: String(src.quality || "auto"),
+          quality: q,
           headers: { "User-Agent": UA, "Referer": ORIGIN + "/" },
           provider: "videasy",
           type: "hls"
-        }));
+        };
+      });
 
       log("found " + streams.length + " streams on " + srv);
       return streams;

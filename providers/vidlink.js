@@ -1,20 +1,9 @@
 /*
- * Videasy — standalone Nuvio provider.
+ * Videasy — DIAGNOSTIC build.
  *
- * Confirmed by test:
- *   - wecollege requires tmdbId (numeric TMDB id only)
- *   - wecollege uses TVDB season structure for S/E
- *   - wecollege ignores title, imdbId, tvdbId params entirely
- *
- * Nuvio already provides TMDB id + TVDB S/E, so no conversion is needed.
- *
- * 12 lanes raced in parallel. 4K-capable lanes (miami/boise) start
- * immediately; others wait PRIORITY_HEAD_START_MS. First lane to return
- * valid sources wins, all others are aborted.
- *
- * Dedup keeps the HIGHEST quality label per URL — Miami returns
- * 1080p/720p/480p/2160p all on the same master.m3u8, so the max label
- * (2160p) is what ships.
+ * Returns EVERY working lane's streams instead of racing.
+ * Use this to verify audio + subtitles per lane manually in Nuvio.
+ * Switch back to the racing version once verified.
  */
 
 const UA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -28,8 +17,6 @@ const SERVERS = [
   "miami","boise","vegas","phoenix","atlanta","seattle","portland",
   "oakland","dallas","tampa","orlando","reno"
 ];
-const FOUR_K_SERVERS         = new Set(["miami","boise"]);
-const PRIORITY_HEAD_START_MS = 400;
 
 const SERVER_LABELS = {
   miami:"Miami", boise:"Boise", vegas:"Vegas", reno:"Reno",
@@ -54,6 +41,11 @@ function rankOf(q) {
   if (n >= 720)  return 5; if (n >= 480)  return 6;
   if (n >= 360)  return 7; if (n >= 240)  return 8;
   return 9;
+}
+
+function subFormat(url) {
+  const m = String(url || "").match(/\.(srt|vtt|ass|ssa)(?:\?|$)/i);
+  return m ? m[1].toLowerCase() : "srt";
 }
 
 async function fetchT(url, opts = {}, ms = TIMEOUT, externalSignal) {
@@ -85,9 +77,7 @@ async function getSeed(tmdbId) {
   } catch(e) { return null; }
 }
 
-async function fetchSources(srv, mediaType, tmdbId, season, episode, seed, signal) {
-  // title is ignored by wecollege — pass a static placeholder.
-  // tmdbId is the only identity that matters.
+async function fetchSources(srv, mediaType, tmdbId, season, episode, seed) {
   let url = SRC_API + "/" + srv + "/sources" +
     "?title=x" +
     "&mediaType=" + mediaType +
@@ -99,58 +89,23 @@ async function fetchSources(srv, mediaType, tmdbId, season, episode, seed, signa
 
   const r = await fetchT(url, {
     headers: { "Origin": ORIGIN, "Referer": ORIGIN + "/", "Accept": "*/*" }
-  }, TIMEOUT, signal);
+  });
   if (r.status !== 200 || r.text.length < 30) return null;
   return r.text;
 }
 
-async function decrypt(encText, tmdbId, seed, signal) {
+async function decrypt(encText, tmdbId, seed) {
   const r = await fetchT(ENC_DEC + "/dec-videasy", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: encText, id: tmdbId, seed: seed })
-  }, TIMEOUT, signal);
+  });
   if (r.status !== 200) return null;
   try {
     const j = JSON.parse(r.text);
     if (j.status !== 200 || !j.result) return null;
     return j.result;
   } catch(e) { return null; }
-}
-
-async function raceServers(mediaType, tmdbId, season, episode, seed) {
-  const shared = new AbortController();
-  let winner = null, settled = false;
-
-  const tasks = SERVERS.map(async (srv) => {
-    const is4K = FOUR_K_SERVERS.has(srv);
-    if (!is4K) {
-      await new Promise(r => setTimeout(r, PRIORITY_HEAD_START_MS));
-      if (settled || shared.signal.aborted) return winner;
-    }
-    try {
-      const enc = await fetchSources(srv, mediaType, tmdbId, season, episode, seed, shared.signal);
-      if (!enc) throw new Error("empty");
-      if (shared.signal.aborted) return winner;
-      const result = await decrypt(enc, tmdbId, seed, shared.signal);
-      if (!result || !Array.isArray(result.sources) || !result.sources.length) throw new Error("no sources");
-      if (shared.signal.aborted) return winner;
-      if (!settled) {
-        settled = true;
-        winner = { srv, result, is4K };
-        const has4K = result.sources.some(s => (parseInt(String(s.quality).replace(/\D/g,""),10)||0) >= 2160);
-        log("🏆 WINNER: " + labelFor(srv) + (is4K ? " [4K-capable]" : "") + (has4K ? " → 4K delivered" : " → no 4K for this title"));
-        try { shared.abort(); } catch(e) {}
-      }
-      return winner;
-    } catch(e) {
-      if (settled) return winner;
-      throw e;
-    }
-  });
-
-  try { await Promise.any(tasks); } catch(e) {}
-  return winner;
 }
 
 async function getStreams(tmdbId, mediaType, season, episode, settings){
@@ -163,57 +118,104 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
     const s = Number(season) || 1;
     const e = Number(episode) || 1;
 
-    log("resolve tmdb=" + id + " " + mediaType + (mediaType === "tv" ? " s" + s + "e" + e : ""));
+    log("DIAGNOSTIC resolve tmdb=" + id + " " + mediaType + (mediaType === "tv" ? " s" + s + "e" + e : ""));
 
     const seed = await getSeed(id);
     if (!seed) { log("seed failed"); return []; }
 
-    const winner = await raceServers(mediaType, id, s, e, seed);
-    if (!winner) { log("all " + SERVERS.length + " servers failed"); return []; }
-
-    const winnerLabel = labelFor(winner.srv);
-    const titleLine = mediaType === "movie"
-      ? "Movie"
-      : "S" + String(s).padStart(2,"0") + "E" + String(e).padStart(2,"0");
-
-    // Dedupe by URL, keeping HIGHEST quality label per URL.
-    // Miami returns 1080p/720p/480p/2160p all pointing to the same master.m3u8 —
-    // the naive first-seen dedup would keep 1080p and drop 2160p.
-    const urlMap = new Map();
-    for (const src of winner.result.sources) {
-      if (!src || !src.url) continue;
-      const url = String(src.url);
-      const q = String(src.quality || "auto");
-      const rank = rankOf(q);
-      const prev = urlMap.get(url);
-      if (!prev || rank < prev.rank) {
-        urlMap.set(url, { url, quality: q, rank });
+    // Fire ALL 12 lanes in parallel — no race, no abort, collect all
+    const laneResults = await Promise.all(SERVERS.map(async (srv) => {
+      try {
+        const enc = await fetchSources(srv, mediaType, id, s, e, seed);
+        if (!enc) return { srv, err: "no sources response" };
+        const result = await decrypt(enc, id, seed);
+        if (!result || !Array.isArray(result.sources) || !result.sources.length) {
+          return { srv, err: "no sources after decrypt" };
+        }
+        const subs = Array.isArray(result.subtitles) ? result.subtitles.filter(x => x && x.url) : [];
+        return { srv, result, subs };
+      } catch (err) {
+        return { srv, err: String(err && err.message || err) };
       }
-    }
+    }));
 
-    const built = [];
-    for (const { url, quality } of urlMap.values()) {
-      built.push({
-        name: winnerLabel + " " + quality,
-        title: titleLine + "\n" + winnerLabel + " " + quality,
+    const streams = [];
+    let globalIdx = 0;
+
+    // Flat index tracker for invisible prefix — one continuous ordering across all lanes
+    function pushStream(name, url, quality, subs) {
+      const label = name + " " + quality + (subs.length ? " · " + subs.length + " subs" : "");
+      const titleLine = mediaType === "movie"
+        ? "Movie"
+        : "S" + String(s).padStart(2,"0") + "E" + String(e).padStart(2,"0");
+
+      streams.push({
+        name: invisiblePrefix(globalIdx++) + label,
+        title: titleLine + "\n" + label,
         url: url,
         quality: quality,
         headers: { "User-Agent": UA, "Referer": ORIGIN + "/" },
+        subtitles: subs,
         provider: "videasy",
         type: "hls",
-        __rank: rankOf(quality)
+        __rank: rankOf(quality),
+        __lane: name
       });
     }
 
-    if (!built.length) { log("winner had no usable sources"); return []; }
-    built.sort((a, b) => a.__rank - b.__rank);
-    for (let i = 0; i < built.length; i++) {
-      built[i].name = invisiblePrefix(i) + built[i].name;
-      delete built[i].__rank;
+    for (const lane of laneResults) {
+      const srvLabel = labelFor(lane.srv);
+
+      if (lane.err) {
+        log("✗ " + srvLabel + " — " + lane.err);
+        continue;
+      }
+
+      const subs = lane.subs.map(sub => ({
+        url: String(sub.url),
+        name: String(sub.lang || sub.language || "Subtitle"),
+        language: String(sub.language || sub.lang || "und"),
+        format: subFormat(sub.url),
+        default: false,
+        headers: { "User-Agent": UA }
+      }));
+
+      // Dedupe per lane — keep highest quality per URL
+      const urlMap = new Map();
+      for (const src of lane.result.sources) {
+        if (!src || !src.url) continue;
+        const url = String(src.url);
+        const q = String(src.quality || "auto");
+        const r = rankOf(q);
+        const prev = urlMap.get(url);
+        if (!prev || r < prev.rank) urlMap.set(url, { url, quality: q, rank: r });
+      }
+
+      for (const { url, quality } of urlMap.values()) {
+        pushStream(srvLabel, url, quality, subs);
+      }
+
+      log("✓ " + srvLabel + " — " + urlMap.size + " src(s), " + subs.length + " subs");
     }
 
-    log("📤 emitting " + built.length + " streams from " + winnerLabel);
-    return built;
+    if (!streams.length) { log("no lane returned sources"); return []; }
+
+    // Sort: primary = quality (high→low), secondary = lane alphabetical
+    // So all 4K entries first (across all lanes), then 1080p, etc.
+    streams.sort((a, b) => {
+      if (a.__rank !== b.__rank) return a.__rank - b.__rank;
+      return a.__lane.localeCompare(b.__lane);
+    });
+
+    // Re-apply invisible prefix after sort
+    for (let i = 0; i < streams.length; i++) {
+      streams[i].name = invisiblePrefix(i) + streams[i].name.replace(/^[\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/, "");
+      delete streams[i].__rank;
+      delete streams[i].__lane;
+    }
+
+    log("📤 emitting " + streams.length + " streams from " + laneResults.filter(x => !x.err).length + "/" + SERVERS.length + " lanes");
+    return streams;
   } catch(e) {
     log("ERROR " + (e && e.message || e));
     return [];

@@ -3,7 +3,6 @@
  *
  * Returns EVERY working lane's streams instead of racing.
  * Use this to verify audio + subtitles per lane manually in Nuvio.
- * Switch back to the racing version once verified.
  */
 
 const UA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
@@ -48,13 +47,9 @@ function subFormat(url) {
   return m ? m[1].toLowerCase() : "srt";
 }
 
-async function fetchT(url, opts = {}, ms = TIMEOUT, externalSignal) {
+async function fetchT(url, opts = {}, ms = TIMEOUT) {
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), ms);
-  if (externalSignal) {
-    if (externalSignal.aborted) c.abort();
-    else externalSignal.addEventListener("abort", () => { try { c.abort(); } catch(e) {} });
-  }
   try {
     const r = await fetch(url, {
       headers: { "User-Agent": UA, ...(opts.headers || {}) },
@@ -123,7 +118,6 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
     const seed = await getSeed(id);
     if (!seed) { log("seed failed"); return []; }
 
-    // Fire ALL 12 lanes in parallel — no race, no abort, collect all
     const laneResults = await Promise.all(SERVERS.map(async (srv) => {
       try {
         const enc = await fetchSources(srv, mediaType, id, s, e, seed);
@@ -140,36 +134,10 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
     }));
 
     const streams = [];
-    let globalIdx = 0;
-
-    // Flat index tracker for invisible prefix — one continuous ordering across all lanes
-    function pushStream(name, url, quality, subs) {
-      const label = name + " " + quality + (subs.length ? " · " + subs.length + " subs" : "");
-      const titleLine = mediaType === "movie"
-        ? "Movie"
-        : "S" + String(s).padStart(2,"0") + "E" + String(e).padStart(2,"0");
-
-      streams.push({
-        name: invisiblePrefix(globalIdx++) + label,
-        title: titleLine + "\n" + label,
-        url: url,
-        quality: quality,
-        headers: { "User-Agent": UA, "Referer": ORIGIN + "/" },
-        subtitles: subs,
-        provider: "videasy",
-        type: "hls",
-        __rank: rankOf(quality),
-        __lane: name
-      });
-    }
 
     for (const lane of laneResults) {
       const srvLabel = labelFor(lane.srv);
-
-      if (lane.err) {
-        log("✗ " + srvLabel + " — " + lane.err);
-        continue;
-      }
+      if (lane.err) { log("✗ " + srvLabel + " — " + lane.err); continue; }
 
       const subs = lane.subs.map(sub => ({
         url: String(sub.url),
@@ -180,7 +148,7 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
         headers: { "User-Agent": UA }
       }));
 
-      // Dedupe per lane — keep highest quality per URL
+      // Per-lane dedupe: keep highest quality per URL
       const urlMap = new Map();
       for (const src of lane.result.sources) {
         if (!src || !src.url) continue;
@@ -191,8 +159,25 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
         if (!prev || r < prev.rank) urlMap.set(url, { url, quality: q, rank: r });
       }
 
+      const titleLine = mediaType === "movie"
+        ? "Movie"
+        : "S" + String(s).padStart(2,"0") + "E" + String(e).padStart(2,"0");
+
       for (const { url, quality } of urlMap.values()) {
-        pushStream(srvLabel, url, quality, subs);
+        const subsSuffix = subs.length ? " · " + subs.length + " subs" : "";
+        const label = srvLabel + " " + quality + subsSuffix;
+        streams.push({
+          name: label,
+          title: titleLine + "\n" + label,
+          url: url,
+          quality: quality,
+          headers: { "User-Agent": UA, "Referer": ORIGIN + "/" },
+          subtitles: subs,
+          provider: "videasy",
+          type: "hls",
+          __rank: rankOf(quality),
+          __lane: srvLabel
+        });
       }
 
       log("✓ " + srvLabel + " — " + urlMap.size + " src(s), " + subs.length + " subs");
@@ -200,16 +185,15 @@ async function getStreams(tmdbId, mediaType, season, episode, settings){
 
     if (!streams.length) { log("no lane returned sources"); return []; }
 
-    // Sort: primary = quality (high→low), secondary = lane alphabetical
-    // So all 4K entries first (across all lanes), then 1080p, etc.
+    // Sort by rank (quality high→low), then lane alphabetical
     streams.sort((a, b) => {
       if (a.__rank !== b.__rank) return a.__rank - b.__rank;
       return a.__lane.localeCompare(b.__lane);
     });
 
-    // Re-apply invisible prefix after sort
+    // Apply invisible prefix ONCE at the end — no strip-and-reapply
     for (let i = 0; i < streams.length; i++) {
-      streams[i].name = invisiblePrefix(i) + streams[i].name.replace(/^[\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/, "");
+      streams[i].name = invisiblePrefix(i) + streams[i].name;
       delete streams[i].__rank;
       delete streams[i].__lane;
     }

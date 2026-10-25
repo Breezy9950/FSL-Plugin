@@ -1,6 +1,6 @@
 {
   "name": "FSL-Plugin",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "4KHDHub, HDHub4u, VidFast, and VidLink direct links",
   "scrapers": [
     {
@@ -40,7 +40,6 @@
       "filename": "providers/vidlink.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
-      "hasSettings": true,
       "formats": ["m3u8"],
       "logo": "https://www.google.com/s2/favicons?domain=vidlink.pro&sz=128",
       "contentLanguage": ["en", "ja"]

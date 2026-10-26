@@ -91,27 +91,6 @@
       ]
     },
     {
-      "id": "hexa",
-      "name": "Hexa",
-      "description": "Movie and TV streaming provider",
-      "version": "1.0.0",
-      "author": "Breezy9950",
-      "filename": "providers/hexa.js",
-      "supportedTypes": [
-        "movie",
-        "tv"
-      ],
-      "enabled": true,
-      "hasSettings": true,
-      "formats": [
-        "m3u8",
-        "mp4"
-      ],
-      "contentLanguage": [
-        "en"
-      ]
-    },
-    {
       "id": "just4anime",
       "name": "Just4Anime",
       "description": "Anime streaming provider",

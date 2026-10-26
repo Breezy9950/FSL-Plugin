@@ -13,7 +13,6 @@ var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var API = "https://enc-dec.app/api";
 
-// Skip Cobra (bad quality) and Cine (always errors)
 var SKIP_SERVERS = ["cobra", "cine"];
 
 function req(_0) {
@@ -153,7 +152,6 @@ function invisiblePrefix(index) {
   return "";
 }
 
-// FIX: Proper ISO mapping
 function getIsoCode(label) {
   if (!label) return "en";
   const l = label.toLowerCase();
@@ -227,37 +225,52 @@ function getStreams(tmdbId, type, season, episode, settings) {
     const titleLine = tmdb.title + " (" + tmdb.year + ")" + seSuffix;
 
     let bestSubtitles = [];
-    const allExtracted = [];
 
-    // 🚀 PARALLEL EXECUTION: Fetch all servers
+    // 🚀 PARALLEL EXECUTION
     const streamPromises = servers.map(function(item, i) {
       return __async(this, null, function* () {
-        if (!item || !item.data) return null;
+        if (!item || !item.data) return [];
         let serverName = item.name || ("S" + (i + 1));
         
-        if (SKIP_SERVERS.includes(serverName.toLowerCase())) return null; 
+        if (SKIP_SERVERS.includes(serverName.toLowerCase())) return []; 
         if (serverName.toLowerCase() === "vrapid") serverName = "Rapid";
         if (serverName.toLowerCase() === "vblaze") serverName = "Blaze";
 
         const url = s2.result.stream + "/" + item.data;
         const enc = yield req(url, { method: "POST", headers: apiHeaders });
-        if (enc.status < 200 || enc.status >= 400) return null;
+        if (enc.status < 200 || enc.status >= 400) return [];
         
         let decoded;
-        try { decoded = yield decVidFast(enc.text); } catch (e) { return null; }
-        if (!decoded || !decoded.url) return null;
+        try { decoded = yield decVidFast(enc.text); } catch (e) { return []; }
+        if (!decoded || !decoded.url) return [];
 
         const streamHeaders = { "Referer": "https://vidfast.vc/", "User-Agent": USER_AGENT };
         const isHls = decoded.url.indexOf(".m3u8") >= 0;
 
+        // 🔥 FIX: Added headers to the subtitle object to bypass the 401 error
         const subs = Array.isArray(decoded.tracks)
           ? decoded.tracks.filter(t => t && (t.file || t.url)).map(t => {
               const u = t.file || t.url;
               const langName = t.label || "Unknown";
               const iso = getIsoCode(langName);
-              return { url: u, language: iso, name: langName, format: u.endsWith(".vtt") ? "vtt" : "srt", default: iso === "en" };
+              return { 
+                url: u, 
+                language: iso, 
+                name: langName, 
+                format: u.endsWith(".vtt") ? "vtt" : "srt", 
+                default: iso === "en",
+                headers: {
+                  "Referer": "https://vidfast.vc/",
+                  "User-Agent": USER_AGENT
+                }
+              };
           })
           : [];
+
+        // Keep track of the largest subtitle set (Bravo usually)
+        if (subs.length > bestSubtitles.length) {
+           bestSubtitles = subs;
+        }
 
         let variants = [];
         if (isHls) {
@@ -296,22 +309,14 @@ function getStreams(tmdbId, type, season, episode, settings) {
             __rank: e.rank
           });
         }
-        
-        // Track the largest subtitle set (usually Bravo's 26 subs)
-        if (subs.length > bestSubtitles.length) {
-           bestSubtitles = subs;
-        }
-
         return localStreams;
       });
     });
 
-    const results = yield Promise.all(streamPromises);
-    for (const r of results) {
-      if (r) allExtracted.push(...r);
-    }
+    const allExtractedArrays = yield Promise.all(streamPromises);
+    let allExtracted = [].concat.apply([], allExtractedArrays);
 
-    // 🔄 CROSS-ATTACH: If a stream has no subs, give it the best subs we found
+    // 🔄 CROSS-ATTACH: If Rapid/Blaze lack subs, inject Bravo's subs
     for (const stream of allExtracted) {
       if (stream.subtitles.length === 0 && bestSubtitles.length > 0) {
         stream.subtitles = bestSubtitles;

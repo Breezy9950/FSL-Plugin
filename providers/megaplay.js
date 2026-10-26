@@ -188,7 +188,13 @@ function signMegaplay(u) {
 async function fetchT(url, opts, timeoutMs) {
   const c = new AbortController(); const t = setTimeout(() => c.abort(), timeoutMs || 8000);
   try {
-    const r = await fetch(url, { method: (opts && opts.method) || "GET", headers: { "User-Agent": UA, "Accept": "*/*", ...((opts && opts.headers) || {}) }, body: opts && opts.body, signal: c.signal });
+    const r = await fetch(url, { 
+      method: (opts && opts.method) || "GET", 
+      headers: { "User-Agent": UA, "Accept": "*/*", ...((opts && opts.headers) || {}) }, 
+      body: opts && opts.body, 
+      signal: c.signal,
+      skipSizeCheck: true // <-- Added to prevent Nuvio from hanging on body stream
+    });
     return { status: r.status, ok: r.ok, text: await r.text() };
   } catch (e) { return { status: 0, ok: false, text: "" }; } finally { clearTimeout(t); }
 }
@@ -204,12 +210,18 @@ async function extractMegaplay(anilistId, episode, lang) {
   const embedUrl = MP_BASE + "/stream/ani/" + anilistId + "/" + episode + "/" + lang;
   log("embed " + embedUrl);
   const html = await getText(embedUrl, { "Referer": MP_REFERER }, 8000);
-  if (!html) return null;
-  const dataIdMatch = html.match(/id="megaplay-player"[^>]*data-id="(\d+)"/i) || html.match(/data-id="(\d+)"/i);
-  if (!dataIdMatch) return null;
+  if (!html) throw new Error("embed page empty");
+  
+  const dataIdMatch = html.match(/data-id\s*=\s*["'](\d+)["']/i);
+  if (!dataIdMatch) throw new Error("no data-id in embed html");
   const dataId = dataIdMatch[1];
-  const json = await getJson(MP_BASE + "/stream/getSources?id=" + dataId, { "Referer": MP_BASE + "/", "X-Requested-With": "XMLHttpRequest" }, 8000);
-  if (!json) return null;
+  
+  const res = await fetchT(MP_BASE + "/stream/getSources?id=" + dataId, { headers: { "Referer": MP_BASE + "/", "X-Requested-With": "XMLHttpRequest" } }, 15000);
+  if (!res.ok) throw new Error("getSources HTTP " + res.status);
+  
+  let json;
+  try { json = JSON.parse(res.text); } catch(e) { throw new Error("getSources invalid json: " + res.text.slice(0, 50)); }
+
   let fileUrl = ""; let tracks = json.tracks || [];
   if (json.enc) {
     try {
@@ -217,9 +229,13 @@ async function extractMegaplay(anilistId, episode, lang) {
       const iv = utf8enc("W0;27ToaUpl_P%'c");
       const parsed = JSON.parse(utf(aesCbcDec(b64dec(json.enc), k, iv)));
       fileUrl = parsed.file; if (parsed.tracks && parsed.tracks.length > 0) tracks = parsed.tracks;
-    } catch (e) { log("decrypt failed: " + e.message); return null; }
-  } else { fileUrl = json.file || (json.sources && json.sources.file); }
-  if (!fileUrl) return null;
+    } catch (e) { throw new Error("decrypt failed: " + e.message); }
+  } else {
+    fileUrl = json.file || (json.sources && json.sources.file);
+  }
+  
+  if (!fileUrl) throw new Error("no file in payload, keys: " + Object.keys(json).join(","));
+  
   fileUrl = signMegaplay(fileUrl);
   const subtitles = [];
   for (let i = 0; i < tracks.length; i++) {
@@ -246,6 +262,13 @@ function modes(settings) {
   return out.length ? out : ["sub"];
 }
 
+function onSettings() {
+  return [
+    { type: "toggle", key: "sub", name: "Sub", label: "Subtitle", default: true },
+    { type: "toggle", key: "dub", name: "Dub", label: "Dub", default: false }
+  ];
+}
+
 async function getStreams(tmdbId, mediaType, season, episode, settings) {
   try {
     mediaType = String(mediaType || "tv").toLowerCase();
@@ -259,12 +282,18 @@ async function getStreams(tmdbId, mediaType, season, episode, settings) {
     log("mapped anilist=" + resolved.anilistId + " absEp=" + resolved.absoluteEpisode);
     const langs = modes(settings); const streams = [];
     for (const lang of langs) {
-      const stream = await extractMegaplay(resolved.anilistId, resolved.absoluteEpisode, lang);
-      if (stream) streams.push(stream);
+      try {
+        const stream = await extractMegaplay(resolved.anilistId, resolved.absoluteEpisode, lang);
+        if (stream) streams.push(stream);
+      } catch(e) {
+        throw new Error(lang + " failed: " + e.message);
+      }
     }
     log("emitting " + streams.length + " stream(s)");
     return streams;
-  } catch (err) { log("ERROR " + (err && err.message || err)); return []; }
+  } catch (err) { 
+    throw new Error("Megaplay error: " + (err && err.message || err)); 
+  }
 }
 
-module.exports = { getStreams };
+module.exports = { getStreams, onSettings };

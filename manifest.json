@@ -44,18 +44,5 @@
       "logo": "https://www.google.com/s2/favicons?domain=vidlink.pro&sz=128",
       "contentLanguage": ["en", "ja"]
     },
-    {
-  "id": "megaplay",
-  "name": "Megaplay",
-  "description": "Requires TVDB season structure. If no streams appear, change your Nuvio library to TVDB (via AIO metadata).",
-  "version": "2.0.0",
-  "author": "Breezy9950",
-  "filename": "providers/megaplay.js",
-  "supportedTypes": ["movie", "tv"],
-  "enabled": true,
-  "hasSettings": true,
-  "formats": ["m3u8", "mp4"],
-  "contentLanguage": ["en", "ja"]
-    }
   ]
 }

@@ -13,12 +13,16 @@ var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var API = "https://enc-dec.app/api";
 
+// Skip these completely (Cobra = terrible bitrate, Cine = always errors 400)
+var SKIP_SERVERS = ["cobra", "cine"];
+
 function req(_0) {
   return __async(this, arguments, function* (url, options = {}) {
     const response = yield fetch(url, {
       method: options.method || "GET",
       headers: Object.assign({ "User-Agent": USER_AGENT, "Accept": "*/*" }, options.headers || {}),
-      body: options.body
+      body: options.body,
+      skipSizeCheck: true
     });
     const text = yield response.text();
     return { status: response.status, text: text };
@@ -34,7 +38,7 @@ function getTmdbDetails(tmdbId, type) {
       const d = yield r.json();
       if (isSeries) return { title: d.name, year: d.first_air_date ? parseInt(d.first_air_date.split("-")[0]) : 0 };
       return { title: d.title, year: d.release_date ? parseInt(d.release_date.split("-")[0]) : 0 };
-    } catch (e) { return null; }
+    } catch (e) { return { title: "Media", year: "" }; }
   });
 }
 
@@ -55,48 +59,35 @@ function decVidFast(encrypted) {
   });
 }
 
-// ============================================================
-// SETTINGS — clean labels, ordered from best to worst quality
-// ============================================================
 function onSettings() {
   return [
-    { type: "toggle", key: "auto",  name: "auto",  label: "Auto",  default: true  },
     { type: "toggle", key: "q2160", name: "q2160", label: "2160p", default: false },
     { type: "toggle", key: "q1440", name: "q1440", label: "1440p", default: false },
     { type: "toggle", key: "q1080", name: "q1080", label: "1080p", default: true  },
-    { type: "toggle", key: "q720",  name: "q720",  label: "720p",  default: false },
+    { type: "toggle", key: "q720",  name: "q720",  label: "720p",  default: true  },
     { type: "toggle", key: "q480",  name: "q480",  label: "480p",  default: false }
   ];
 }
 
 function resolveSettings(input) {
-  const out = { auto: true, q2160: false, q1440: false, q1080: true, q720: false, q480: false };
+  const out = { q2160: false, q1440: false, q1080: true, q720: true, q480: false };
   try {
     let s = input;
     if (!s && typeof globalThis !== "undefined") s = globalThis.SCRAPER_SETTINGS || globalThis.SETTINGS || globalThis.settings;
     if (!s && typeof global !== "undefined") s = global.SCRAPER_SETTINGS || global.SETTINGS || global.settings;
-    if (!s && typeof window !== "undefined") s = window.SCRAPER_SETTINGS || window.SETTINGS || window.settings;
     if (!s) return out;
 
-    const keys = ["auto", "q2160", "q1440", "q1080", "q720", "q480"];
-    const present = keys.filter(function (k) { return s[k] !== undefined; });
-    if (!present.length) return out;
-
+    const keys = ["q2160", "q1440", "q1080", "q720", "q480"];
     keys.forEach(function (k) {
       let v = s[k];
       if (typeof v === "object" && v !== null) v = v.value !== undefined ? v.value : v.key;
       if (v === true || v === "true" || v === "on" || v === "yes" || v === 1 || v === "1") out[k] = true;
       else if (v === false || v === "false" || v === "off" || v === "no" || v === 0 || v === "0") out[k] = false;
     });
-
-    if (!out.auto && !out.q2160 && !out.q1440 && !out.q1080 && !out.q720 && !out.q480) out.auto = true;
   } catch (e) { console.log("[VidFast] settings parse: " + e.message); }
   return out;
 }
 
-// ============================================================
-// HELPERS
-// ============================================================
 function parseHlsVariants(masterUrl, text) {
   const lines = text.split(/\r?\n/);
   const variants = [];
@@ -106,7 +97,6 @@ function parseHlsVariants(masterUrl, text) {
 
     const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
     const height = resMatch ? parseInt(resMatch[1]) : 0;
-
     const bwMatch = line.match(/BANDWIDTH=(\d+)/i);
     const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
 
@@ -147,15 +137,12 @@ function parseHlsVariants(masterUrl, text) {
   return variants;
 }
 
-// Bucket a real playlist height into a toggle tier.
-// Real height is preserved for the label — boundaries only decide
-// which toggle controls it.
 function tierOf(height) {
-  if (height >= 1900) return "q2160";  // 2160p, 2140p, 2000p
-  if (height >= 1200) return "q1440";  // 1600p, 1440p, 1280p
-  if (height >= 900)  return "q1080";  // 1080p, 1050p, 900p
-  if (height >= 600)  return "q720";   // 720p, 704p, 640p
-  if (height >= 400)  return "q480";   // 480p, 426p, 400p
+  if (height >= 1900) return "q2160";
+  if (height >= 1200) return "q1440";
+  if (height >= 900)  return "q1080";
+  if (height >= 600)  return "q720";
+  if (height >= 400)  return "q480";
   return null;
 }
 
@@ -164,9 +151,7 @@ function cleanDesc(desc) {
   return String(desc).replace(/,\s*4K\?/i, "").replace(/\s*4K\?\s*$/i, "").trim();
 }
 
-// Rank for sorting: Auto first, then quality tiers high→low
 function rankOf(tier) {
-  if (tier === "auto")  return 0;
   if (tier === "q2160") return 1;
   if (tier === "q1440") return 2;
   if (tier === "q1080") return 3;
@@ -175,173 +160,182 @@ function rankOf(tier) {
   return 9;
 }
 
-// Invisible Unicode Variation Selector prefixes — force Nuvio to keep
-// our order regardless of what its own sorter does. Same technique the
-// 4KHDHub scraper uses.
 function invisiblePrefix(index) {
-  if (index < 16)  return String.fromCodePoint(0xFE00 + index);          // VS1..VS16
-  if (index < 256) return String.fromCodePoint(0xE0100 + (index - 16));  // VS17..VS256
+  if (index < 16)  return String.fromCodePoint(0xFE00 + index);
+  if (index < 256) return String.fromCodePoint(0xE0100 + (index - 16));
   return "";
 }
 
-// ============================================================
-// MAIN
-// ============================================================
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
     const resolved = resolveSettings(settings);
-    console.log("[VidFast] auto=" + resolved.auto + " 2160=" + resolved.q2160 + " 1440=" + resolved.q1440 + " 1080=" + resolved.q1080 + " 720=" + resolved.q720 + " 480=" + resolved.q480);
+    
+    const [tmdb, page] = yield Promise.all([
+      getTmdbDetails(tmdbId, type),
+      req(type === "movie" 
+        ? "https://vidfast.vc/movie/" + tmdbId + "/" 
+        : "https://vidfast.vc/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1) + "/")
+    ]);
 
-    const tmdb = yield getTmdbDetails(tmdbId, type);
-    if (!tmdb) return [];
+    if (!tmdb || page.status < 200 || page.status >= 400) return [];
     const isMovie = type === "movie";
 
-    const pageUrl = isMovie
-      ? "https://vidfast.vc/movie/" + tmdbId + "/"
-      : "https://vidfast.vc/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1) + "/";
-
-    const page = yield req(pageUrl);
-    if (page.status < 200 || page.status >= 400) { console.log("[VidFast] Page HTTP " + page.status); return []; }
-
     const tokenMatch = page.text.match(/\\"(?:en|token)\\":\\"([^"\\]+)\\"/);
-    if (!tokenMatch) { console.log("[VidFast] Page token not found"); return []; }
-    const pageToken = tokenMatch[1];
-
-    const s1Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(pageToken) + "&stage=1");
-    if (s1Resp.status < 200 || s1Resp.status >= 400) { console.log("[VidFast] Stage1 HTTP " + s1Resp.status); return []; }
+    if (!tokenMatch) return [];
+    
+    const s1Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(tokenMatch[1]) + "&stage=1");
+    if (s1Resp.status < 200 || s1Resp.status >= 400) return [];
     let s1; try { s1 = JSON.parse(s1Resp.text); } catch (e) { return []; }
-    if (s1.status !== 200 || !s1.result) { console.log("[VidFast] Stage1 status " + s1.status); return []; }
-    const stage1Url = s1.result.stage1;
-    const csrf1 = s1.result.token;
+    if (s1.status !== 200 || !s1.result) return [];
 
     const stageHeaders = {
       "Referer": "https://vidfast.vc/",
       "X-Requested-With": "XMLHttpRequest",
-      "X-CSRF-Token": csrf1
+      "X-CSRF-Token": s1.result.token
     };
-    const s1Post = yield req(stage1Url, { method: "POST", headers: stageHeaders });
-    if (s1Post.status < 200 || s1Post.status >= 400) { console.log("[VidFast] Stage1-POST HTTP " + s1Post.status); return []; }
+    const s1Post = yield req(s1.result.stage1, { method: "POST", headers: stageHeaders });
+    if (s1Post.status < 200 || s1Post.status >= 400) return [];
     const stageText = s1Post.text.trim();
-    if (!stageText) { console.log("[VidFast] Stage1-POST empty"); return []; }
+    if (!stageText) return [];
 
     const s2Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(stageText) + "&stage=2");
-    if (s2Resp.status < 200 || s2Resp.status >= 400) { console.log("[VidFast] Stage2 HTTP " + s2Resp.status); return []; }
+    if (s2Resp.status < 200 || s2Resp.status >= 400) return [];
     let s2; try { s2 = JSON.parse(s2Resp.text); } catch (e) { return []; }
-    if (s2.status !== 200 || !s2.result) { console.log("[VidFast] Stage2 status " + s2.status); return []; }
-    const serversUrl = s2.result.servers;
-    const streamBase = s2.result.stream;
-    const csrf2 = s2.result.token;
+    if (s2.status !== 200 || !s2.result) return [];
 
     const apiHeaders = {
       "Referer": "https://vidfast.vc/",
       "X-Requested-With": "XMLHttpRequest",
-      "X-CSRF-Token": csrf2
+      "X-CSRF-Token": s2.result.token
     };
 
-    const srvResp = yield req(serversUrl, { method: "POST", headers: apiHeaders });
-    if (srvResp.status < 200 || srvResp.status >= 400) { console.log("[VidFast] Servers HTTP " + srvResp.status); return []; }
+    const srvResp = yield req(s2.result.servers, { method: "POST", headers: apiHeaders });
+    if (srvResp.status < 200 || srvResp.status >= 400) return [];
+    
     let servers;
-    try { servers = yield decVidFast(srvResp.text); }
-    catch (e) { console.log("[VidFast] Server decrypt: " + e.message); return []; }
-    if (!Array.isArray(servers) || !servers.length) { console.log("[VidFast] Empty server list"); return []; }
-    console.log("[VidFast] " + servers.length + " servers");
+    try { servers = yield decVidFast(srvResp.text); } catch (e) { return []; }
+    if (!Array.isArray(servers) || !servers.length) return [];
 
     const seSuffix = !isMovie && season && episode
       ? " S" + String(season).padStart(2, "0") + "E" + String(episode).padStart(2, "0")
       : "";
     const titleLine = tmdb.title + " (" + tmdb.year + ")" + seSuffix;
 
-    const streams = [];
-
-    for (let i = 0; i < servers.length; i++) {
-      const item = servers[i];
-      if (!item || !item.data) continue;
-      const url = streamBase + "/" + item.data;
-      const enc = yield req(url, { method: "POST", headers: apiHeaders });
-      if (enc.status < 200 || enc.status >= 400) continue;
-      let decoded;
-      try { decoded = yield decVidFast(enc.text); }
-      catch (e) { continue; }
-      if (!decoded || !decoded.url) continue;
-
-      const streamHeaders = {
-        "Referer": "https://vidfast.vc/",
-        "User-Agent": USER_AGENT
-      };
-      const isDash = decoded.url.indexOf(".mpd") >= 0;
-      const isHls = !isDash && decoded.url.indexOf(".m3u8") >= 0;
-      const serverName = item.name || ("S" + (i + 1));
-      const serverDesc = cleanDesc(item.description);
-
-      const subs = Array.isArray(decoded.tracks)
-        ? decoded.tracks.filter(function (t) { return t && t.file; }).map(function (t) { return { language: t.label || "Subtitle", url: t.file }; })
-        : [];
-
-      let variants = [];
-      if (isHls) {
-        try {
-          const mResp = yield req(decoded.url, { headers: streamHeaders });
-          if (mResp.status >= 200 && mResp.status < 400 && mResp.text.indexOf("#EXTM3U") === 0) {
-            variants = parseHlsVariants(decoded.url, mResp.text);
-          }
-        } catch (e) { console.log("[VidFast] master parse failed on " + serverName + ": " + e.message); }
-      }
-
-      const entries = [];
-
-      if (resolved.auto) {
-        entries.push({ label: "Auto", url: decoded.url, codec: "", rank: rankOf("auto") });
-      }
-
-      if (isHls && variants.length) {
-        for (let k = 0; k < variants.length; k++) {
-          const v = variants[k];
-          const tier = tierOf(v.height);
-          if (!tier || !resolved[tier]) continue;
-          const label = v.height ? (v.height + "p") : ("Q" + (k + 1));
-          entries.push({ label: label, url: v.url, codec: v.codec, rank: rankOf(tier) });
+    // 🚀 PARALLEL EXECUTION with Skip List
+    const streamPromises = servers.map(function(item, i) {
+      return __async(this, null, function* () {
+        if (!item || !item.data) return [];
+        
+        let serverName = item.name || ("S" + (i + 1));
+        
+        // Skip Cobra and Cine instantly without doing network requests
+        if (SKIP_SERVERS.includes(serverName.toLowerCase())) {
+          return []; 
         }
-      }
 
-      // If nothing matched the user's toggles, skip this server entirely
-      if (!entries.length) {
-        console.log("[VidFast] Skipping " + serverName + " — no matching qualities");
-        continue;
-      }
+        // Clean up server names
+        if (serverName.toLowerCase() === "vrapid") serverName = "Rapid";
+        if (serverName.toLowerCase() === "vblaze") serverName = "Blaze";
 
-      for (let k = 0; k < entries.length; k++) {
-        const e = entries[k];
+        const url = s2.result.stream + "/" + item.data;
+        const enc = yield req(url, { method: "POST", headers: apiHeaders });
+        if (enc.status < 200 || enc.status >= 400) return [];
+        
+        let decoded;
+        try { decoded = yield decVidFast(enc.text); } catch (e) { return []; }
+        if (!decoded || !decoded.url) return [];
 
-        const tagParts = [serverName, e.label];
-        if (e.codec) tagParts.push(e.codec);
-        if (serverDesc) tagParts.push(serverDesc);
-        const tagLine = tagParts.join(" • ");
+        const streamHeaders = { "Referer": "https://vidfast.vc/", "User-Agent": USER_AGENT };
+        const isHls = decoded.url.indexOf(".m3u8") >= 0;
+        const serverDesc = cleanDesc(item.description);
 
-        streams.push({
-          name: serverName + " " + e.label,
-          title: [titleLine, tagLine].join("\n"),
-          size: [titleLine, tagLine].join("\n"),
-          description: [titleLine, tagLine].join("\n"),
-          url: e.url,
-          headers: streamHeaders,
-          subtitles: subs,
-          behaviorHints: { bingeGroup: "vidfast-" + serverName + "-" + e.label },
-          __rank: e.rank
-        });
-      }
-    }
+        // Format Subtitles for Nuvio
+        const subs = Array.isArray(decoded.tracks)
+          ? decoded.tracks.filter(t => t && (t.file || t.url)).map(t => {
+              const langStr = String(t.label || t.language || "en").toLowerCase();
+              let iso = "en";
+              if (langStr.includes("spanish")) iso = "es";
+              else if (langStr.includes("french")) iso = "fr";
+              else if (langStr.includes("german")) iso = "de";
+              else if (langStr.includes("portuguese")) iso = "pt";
+              else if (langStr.includes("italian")) iso = "it";
+              else if (langStr.includes("russian")) iso = "ru";
+              else if (langStr.includes("arabic")) iso = "ar";
+              else if (langStr.includes("japanese")) iso = "ja";
+              else if (langStr.includes("chinese")) iso = "zh";
+              else if (langStr.includes("korean")) iso = "ko";
+              else if (langStr.includes("polish")) iso = "pl";
+              else if (langStr.includes("turkish")) iso = "tr";
+              else if (langStr.length === 2) iso = langStr;
+              
+              const u = t.file || t.url;
+              return {
+                url: u,
+                language: iso,
+                name: t.label || iso.toUpperCase(),
+                format: u.endsWith(".vtt") ? "vtt" : "srt",
+                default: iso === "en"
+              };
+          })
+          : [];
 
-    // Sort by quality tier — Auto first, then 2160p, 1440p, 1080p, 720p, 480p.
-    // Stable sort keeps servers in original order within each tier.
+        let variants = [];
+        if (isHls) {
+          try {
+            const mResp = yield req(decoded.url, { headers: streamHeaders });
+            if (mResp.status >= 200 && mResp.status < 400 && mResp.text.indexOf("#EXTM3U") === 0) {
+              variants = parseHlsVariants(decoded.url, mResp.text);
+            }
+          } catch (e) { }
+        }
+
+        const entries = [];
+        if (isHls && variants.length) {
+          for (let k = 0; k < variants.length; k++) {
+            const v = variants[k];
+            const tier = tierOf(v.height);
+            if (!tier || !resolved[tier]) continue;
+            const label = v.height ? (v.height + "p") : ("Q" + (k + 1));
+            entries.push({ label: label, url: v.url, codec: v.codec, rank: rankOf(tier) });
+          }
+        } else if (!isHls && decoded.url) {
+          entries.push({ label: "MP4", url: decoded.url, codec: "", rank: rankOf("q1080") });
+        }
+
+        const localStreams = [];
+        for (let k = 0; k < entries.length; k++) {
+          const e = entries[k];
+          const tagParts = [serverName, e.label];
+          if (e.codec) tagParts.push(e.codec);
+          if (serverDesc) tagParts.push(serverDesc);
+          const tagLine = tagParts.join(" • ");
+
+          localStreams.push({
+            name: serverName + " " + e.label,
+            title: [titleLine, tagLine].join("\n"),
+            size: [titleLine, tagLine].join("\n"),
+            description: [titleLine, tagLine].join("\n"),
+            url: e.url,
+            headers: streamHeaders,
+            subtitles: subs,
+            behaviorHints: { bingeGroup: "vidfast-" + serverName + "-" + e.label },
+            __rank: e.rank
+          });
+        }
+        return localStreams;
+      });
+    });
+
+    const allStreamsArrays = yield Promise.all(streamPromises);
+    let streams = [].concat.apply([], allStreamsArrays);
+
     streams.sort(function (a, b) { return a.__rank - b.__rank; });
 
-    // Apply invisible Unicode prefixes so Nuvio's own sorter can't reorder them.
     for (let i = 0; i < streams.length; i++) {
       streams[i].name = invisiblePrefix(i) + streams[i].name;
       delete streams[i].__rank;
     }
 
-    console.log("[VidFast] " + streams.length + " streams emitted");
     return streams;
   });
 }

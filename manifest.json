@@ -10,12 +10,19 @@
       "version": "1.0.0",
       "author": "Breezy9950",
       "filename": "providers/4khdhub.js",
-      "supportedTypes": ["movie", "tv"],
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
       "enabled": true,
       "hasSettings": true,
-      "formats": ["mkv"],
+      "formats": [
+        "mkv"
+      ],
       "logo": "https://www.google.com/s2/favicons?domain=4khdhub.click&sz=128",
-      "contentLanguage": ["en"]
+      "contentLanguage": [
+        "en"
+      ]
     },
     {
       "id": "maxstream-vidfast",
@@ -24,12 +31,20 @@
       "version": "1.0.2",
       "author": "Breezy9950",
       "filename": "providers/vidfast.js",
-      "supportedTypes": ["movie", "tv"],
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
       "enabled": true,
       "hasSettings": true,
-      "formats": ["mkv", "mp4"],
+      "formats": [
+        "mkv",
+        "mp4"
+      ],
       "logo": "https://www.google.com/s2/favicons?domain=vidfast.vc&sz=128",
-      "contentLanguage": ["en"]
+      "contentLanguage": [
+        "en"
+      ]
     },
     {
       "id": "videasy",
@@ -38,11 +53,84 @@
       "version": "1.0.0",
       "author": "Breezy9950",
       "filename": "providers/videasy.js",
-      "supportedTypes": ["movie", "tv"],
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
       "enabled": true,
-      "formats": ["m3u8"],
+      "formats": [
+        "m3u8"
+      ],
       "logo": "https://www.google.com/s2/favicons?domain=vidlink.pro&sz=128",
-      "contentLanguage": ["en", "ja"]
+      "contentLanguage": [
+        "en",
+        "ja"
+      ]
     },
+    {
+      "id": "vidlink",
+      "name": "VidLink",
+      "description": "VidLink movie and TV streaming provider",
+      "version": "1.0.0",
+      "author": "Breezy9950",
+      "filename": "providers/vidlink.js",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "enabled": true,
+      "hasSettings": false,
+      "formats": [
+        "m3u8",
+        "mp4"
+      ],
+      "logo": "https://www.google.com/s2/favicons?domain=vidlink.pro&sz=128",
+      "contentLanguage": [
+        "en",
+        "ja"
+      ]
+    },
+    {
+      "id": "hexa",
+      "name": "Hexa",
+      "description": "Movie and TV streaming provider",
+      "version": "1.0.0",
+      "author": "Breezy9950",
+      "filename": "providers/hexa.js",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "enabled": true,
+      "hasSettings": true,
+      "formats": [
+        "m3u8",
+        "mp4"
+      ],
+      "contentLanguage": [
+        "en"
+      ]
+    },
+    {
+      "id": "just4anime",
+      "name": "Just4Anime",
+      "description": "Anime streaming provider",
+      "version": "1.0.0",
+      "author": "Breezy9950",
+      "filename": "providers/just4anime.js",
+      "supportedTypes": [
+        "tv"
+      ],
+      "enabled": true,
+      "hasSettings": true,
+      "formats": [
+        "m3u8",
+        "mp4"
+      ],
+      "contentLanguage": [
+        "en",
+        "ja"
+      ]
+    }
   ]
 }

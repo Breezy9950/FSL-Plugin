@@ -13,7 +13,7 @@ var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var API = "https://enc-dec.app/api";
 
-// Skip these completely (Cobra = terrible bitrate, Cine = always errors 400)
+// Skip Cobra (bad quality) and Cine (always errors)
 var SKIP_SERVERS = ["cobra", "cine"];
 
 function req(_0) {
@@ -94,12 +94,10 @@ function parseHlsVariants(masterUrl, text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line.indexOf("#EXT-X-STREAM-INF") !== 0) continue;
-
     const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
     const height = resMatch ? parseInt(resMatch[1]) : 0;
     const bwMatch = line.match(/BANDWIDTH=(\d+)/i);
     const bandwidth = bwMatch ? parseInt(bwMatch[1]) : 0;
-
     let codec = "";
     const codecMatch = line.match(/CODECS="([^"]+)"/i);
     if (codecMatch) {
@@ -109,14 +107,12 @@ function parseHlsVariants(masterUrl, text) {
       else if (c.indexOf("av01") >= 0) codec = "AV1";
       else if (c.indexOf("vp9") >= 0) codec = "VP9";
     }
-
     let uri = null;
     for (let j = i + 1; j < lines.length; j++) {
       const l = lines[j].trim();
       if (l && l.charAt(0) !== "#") { uri = l; break; }
     }
     if (!uri) continue;
-
     let absolute;
     if (uri.indexOf("http") === 0) absolute = uri;
     else {
@@ -127,13 +123,9 @@ function parseHlsVariants(masterUrl, text) {
         catch (e) { absolute = base + uri.replace(/^\//, ""); }
       } else absolute = base + uri;
     }
-
-    variants.push({ height: height, bandwidth: bandwidth, codec: codec, url: absolute });
+    variants.push({ height, bandwidth, codec, url: absolute });
   }
-  variants.sort(function (a, b) {
-    if (b.bandwidth !== a.bandwidth) return b.bandwidth - a.bandwidth;
-    return b.height - a.height;
-  });
+  variants.sort((a, b) => b.bandwidth !== a.bandwidth ? b.bandwidth - a.bandwidth : b.height - a.height);
   return variants;
 }
 
@@ -144,11 +136,6 @@ function tierOf(height) {
   if (height >= 600)  return "q720";
   if (height >= 400)  return "q480";
   return null;
-}
-
-function cleanDesc(desc) {
-  if (!desc) return "";
-  return String(desc).replace(/,\s*4K\?/i, "").replace(/\s*4K\?\s*$/i, "").trim();
 }
 
 function rankOf(tier) {
@@ -166,15 +153,48 @@ function invisiblePrefix(index) {
   return "";
 }
 
+// FIX: Proper ISO mapping
+function getIsoCode(label) {
+  if (!label) return "en";
+  const l = label.toLowerCase();
+  if (l.includes("english")) return "en";
+  if (l.includes("spanish")) return "es";
+  if (l.includes("french")) return "fr";
+  if (l.includes("german")) return "de";
+  if (l.includes("portuguese")) return "pt";
+  if (l.includes("italian")) return "it";
+  if (l.includes("russian")) return "ru";
+  if (l.includes("arabic")) return "ar";
+  if (l.includes("japanese")) return "ja";
+  if (l.includes("chinese")) return "zh";
+  if (l.includes("korean")) return "ko";
+  if (l.includes("polish")) return "pl";
+  if (l.includes("turkish")) return "tr";
+  if (l.includes("finnish")) return "fi";
+  if (l.includes("croatian")) return "hr";
+  if (l.includes("danish")) return "da";
+  if (l.includes("dutch")) return "nl";
+  if (l.includes("greek")) return "el";
+  if (l.includes("hebrew")) return "he";
+  if (l.includes("hungarian")) return "hu";
+  if (l.includes("icelandic")) return "is";
+  if (l.includes("indonesian")) return "id";
+  if (l.includes("norwegian")) return "no";
+  if (l.includes("romanian")) return "ro";
+  if (l.includes("swedish")) return "sv";
+  if (l.includes("thai")) return "th";
+  if (l.includes("vietnamese")) return "vi";
+  if (l.length === 2) return l;
+  return "en";
+}
+
 function getStreams(tmdbId, type, season, episode, settings) {
   return __async(this, null, function* () {
     const resolved = resolveSettings(settings);
     
     const [tmdb, page] = yield Promise.all([
       getTmdbDetails(tmdbId, type),
-      req(type === "movie" 
-        ? "https://vidfast.vc/movie/" + tmdbId + "/" 
-        : "https://vidfast.vc/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1) + "/")
+      req(type === "movie" ? "https://vidfast.vc/movie/" + tmdbId + "/" : "https://vidfast.vc/tv/" + tmdbId + "/" + (season || 1) + "/" + (episode || 1) + "/")
     ]);
 
     if (!tmdb || page.status < 200 || page.status >= 400) return [];
@@ -186,29 +206,16 @@ function getStreams(tmdbId, type, season, episode, settings) {
     const s1Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(tokenMatch[1]) + "&stage=1");
     if (s1Resp.status < 200 || s1Resp.status >= 400) return [];
     let s1; try { s1 = JSON.parse(s1Resp.text); } catch (e) { return []; }
-    if (s1.status !== 200 || !s1.result) return [];
-
-    const stageHeaders = {
-      "Referer": "https://vidfast.vc/",
-      "X-Requested-With": "XMLHttpRequest",
-      "X-CSRF-Token": s1.result.token
-    };
+    
+    const stageHeaders = { "Referer": "https://vidfast.vc/", "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": s1.result.token };
     const s1Post = yield req(s1.result.stage1, { method: "POST", headers: stageHeaders });
     if (s1Post.status < 200 || s1Post.status >= 400) return [];
-    const stageText = s1Post.text.trim();
-    if (!stageText) return [];
-
-    const s2Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(stageText) + "&stage=2");
+    
+    const s2Resp = yield req(API + "/enc-vidfast?text=" + encodeURIComponent(s1Post.text.trim()) + "&stage=2");
     if (s2Resp.status < 200 || s2Resp.status >= 400) return [];
     let s2; try { s2 = JSON.parse(s2Resp.text); } catch (e) { return []; }
-    if (s2.status !== 200 || !s2.result) return [];
 
-    const apiHeaders = {
-      "Referer": "https://vidfast.vc/",
-      "X-Requested-With": "XMLHttpRequest",
-      "X-CSRF-Token": s2.result.token
-    };
-
+    const apiHeaders = { "Referer": "https://vidfast.vc/", "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": s2.result.token };
     const srvResp = yield req(s2.result.servers, { method: "POST", headers: apiHeaders });
     if (srvResp.status < 200 || srvResp.status >= 400) return [];
     
@@ -216,66 +223,39 @@ function getStreams(tmdbId, type, season, episode, settings) {
     try { servers = yield decVidFast(srvResp.text); } catch (e) { return []; }
     if (!Array.isArray(servers) || !servers.length) return [];
 
-    const seSuffix = !isMovie && season && episode
-      ? " S" + String(season).padStart(2, "0") + "E" + String(episode).padStart(2, "0")
-      : "";
+    const seSuffix = !isMovie && season && episode ? " S" + String(season).padStart(2, "0") + "E" + String(episode).padStart(2, "0") : "";
     const titleLine = tmdb.title + " (" + tmdb.year + ")" + seSuffix;
 
-    // 🚀 PARALLEL EXECUTION with Skip List
+    let bestSubtitles = [];
+    const allExtracted = [];
+
+    // 🚀 PARALLEL EXECUTION: Fetch all servers
     const streamPromises = servers.map(function(item, i) {
       return __async(this, null, function* () {
-        if (!item || !item.data) return [];
-        
+        if (!item || !item.data) return null;
         let serverName = item.name || ("S" + (i + 1));
         
-        // Skip Cobra and Cine instantly without doing network requests
-        if (SKIP_SERVERS.includes(serverName.toLowerCase())) {
-          return []; 
-        }
-
-        // Clean up server names
+        if (SKIP_SERVERS.includes(serverName.toLowerCase())) return null; 
         if (serverName.toLowerCase() === "vrapid") serverName = "Rapid";
         if (serverName.toLowerCase() === "vblaze") serverName = "Blaze";
 
         const url = s2.result.stream + "/" + item.data;
         const enc = yield req(url, { method: "POST", headers: apiHeaders });
-        if (enc.status < 200 || enc.status >= 400) return [];
+        if (enc.status < 200 || enc.status >= 400) return null;
         
         let decoded;
-        try { decoded = yield decVidFast(enc.text); } catch (e) { return []; }
-        if (!decoded || !decoded.url) return [];
+        try { decoded = yield decVidFast(enc.text); } catch (e) { return null; }
+        if (!decoded || !decoded.url) return null;
 
         const streamHeaders = { "Referer": "https://vidfast.vc/", "User-Agent": USER_AGENT };
         const isHls = decoded.url.indexOf(".m3u8") >= 0;
-        const serverDesc = cleanDesc(item.description);
 
-        // Format Subtitles for Nuvio
         const subs = Array.isArray(decoded.tracks)
           ? decoded.tracks.filter(t => t && (t.file || t.url)).map(t => {
-              const langStr = String(t.label || t.language || "en").toLowerCase();
-              let iso = "en";
-              if (langStr.includes("spanish")) iso = "es";
-              else if (langStr.includes("french")) iso = "fr";
-              else if (langStr.includes("german")) iso = "de";
-              else if (langStr.includes("portuguese")) iso = "pt";
-              else if (langStr.includes("italian")) iso = "it";
-              else if (langStr.includes("russian")) iso = "ru";
-              else if (langStr.includes("arabic")) iso = "ar";
-              else if (langStr.includes("japanese")) iso = "ja";
-              else if (langStr.includes("chinese")) iso = "zh";
-              else if (langStr.includes("korean")) iso = "ko";
-              else if (langStr.includes("polish")) iso = "pl";
-              else if (langStr.includes("turkish")) iso = "tr";
-              else if (langStr.length === 2) iso = langStr;
-              
               const u = t.file || t.url;
-              return {
-                url: u,
-                language: iso,
-                name: t.label || iso.toUpperCase(),
-                format: u.endsWith(".vtt") ? "vtt" : "srt",
-                default: iso === "en"
-              };
+              const langName = t.label || "Unknown";
+              const iso = getIsoCode(langName);
+              return { url: u, language: iso, name: langName, format: u.endsWith(".vtt") ? "vtt" : "srt", default: iso === "en" };
           })
           : [];
 
@@ -295,8 +275,7 @@ function getStreams(tmdbId, type, season, episode, settings) {
             const v = variants[k];
             const tier = tierOf(v.height);
             if (!tier || !resolved[tier]) continue;
-            const label = v.height ? (v.height + "p") : ("Q" + (k + 1));
-            entries.push({ label: label, url: v.url, codec: v.codec, rank: rankOf(tier) });
+            entries.push({ label: v.height ? (v.height + "p") : ("Q" + (k + 1)), url: v.url, codec: v.codec, rank: rankOf(tier) });
           }
         } else if (!isHls && decoded.url) {
           entries.push({ label: "MP4", url: decoded.url, codec: "", rank: rankOf("q1080") });
@@ -305,16 +284,11 @@ function getStreams(tmdbId, type, season, episode, settings) {
         const localStreams = [];
         for (let k = 0; k < entries.length; k++) {
           const e = entries[k];
-          const tagParts = [serverName, e.label];
-          if (e.codec) tagParts.push(e.codec);
-          if (serverDesc) tagParts.push(serverDesc);
-          const tagLine = tagParts.join(" • ");
+          const tagLine = [serverName, e.label, e.codec].filter(Boolean).join(" • ");
 
           localStreams.push({
             name: serverName + " " + e.label,
             title: [titleLine, tagLine].join("\n"),
-            size: [titleLine, tagLine].join("\n"),
-            description: [titleLine, tagLine].join("\n"),
             url: e.url,
             headers: streamHeaders,
             subtitles: subs,
@@ -322,21 +296,46 @@ function getStreams(tmdbId, type, season, episode, settings) {
             __rank: e.rank
           });
         }
+        
+        // Track the largest subtitle set (usually Bravo's 26 subs)
+        if (subs.length > bestSubtitles.length) {
+           bestSubtitles = subs;
+        }
+
         return localStreams;
       });
     });
 
-    const allStreamsArrays = yield Promise.all(streamPromises);
-    let streams = [].concat.apply([], allStreamsArrays);
-
-    streams.sort(function (a, b) { return a.__rank - b.__rank; });
-
-    for (let i = 0; i < streams.length; i++) {
-      streams[i].name = invisiblePrefix(i) + streams[i].name;
-      delete streams[i].__rank;
+    const results = yield Promise.all(streamPromises);
+    for (const r of results) {
+      if (r) allExtracted.push(...r);
     }
 
-    return streams;
+    // 🔄 CROSS-ATTACH: If a stream has no subs, give it the best subs we found
+    for (const stream of allExtracted) {
+      if (stream.subtitles.length === 0 && bestSubtitles.length > 0) {
+        stream.subtitles = bestSubtitles;
+      }
+    }
+
+    // Sort so 1080p is at the top, and Rapid/Blaze are prioritized
+    allExtracted.sort((a, b) => {
+      if (a.__rank !== b.__rank) return a.__rank - b.__rank;
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+      if (aName.includes("rapid") && !bName.includes("rapid")) return -1;
+      if (bName.includes("rapid") && !aName.includes("rapid")) return 1;
+      if (aName.includes("blaze") && !bName.includes("blaze")) return -1;
+      if (bName.includes("blaze") && !aName.includes("blaze")) return 1;
+      return 0;
+    });
+
+    for (let i = 0; i < allExtracted.length; i++) {
+      allExtracted[i].name = invisiblePrefix(i) + allExtracted[i].name;
+      delete allExtracted[i].__rank;
+    }
+
+    return allExtracted;
   });
 }
 

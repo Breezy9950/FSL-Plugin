@@ -601,7 +601,7 @@ function scrape(ctx) {
 }
 
 // src/vidlink/index.js
-function getStreams(tmdbId, mediaType, season, episode) {
+function vidlinkOriginalGetStreams(tmdbId, mediaType, season, episode) {
   return __async(this, null, function* () {
     try {
       const ctx = yield buildCtx(tmdbId, mediaType, season, episode);
@@ -613,4 +613,74 @@ function getStreams(tmdbId, mediaType, season, episode) {
     }
   });
 }
-module.exports = { getStreams };
+
+
+function vidlinkQualitySettings() {
+  return [["q2160","2160p",false],["q1440","1440p",false],["q1080","1080p",true],["q720","720p",true],["q480","480p",true],["q360","360p",true]].map(function(t) {
+    return {type:"toggle",key:t[0],name:t[0],label:t[1],default:t[2]};
+  });
+}
+function vidlinkResolveQualitySettings(input) {
+  var out = {};
+  [["q2160","2160p",false],["q1440","1440p",false],["q1080","1080p",true],["q720","720p",true],["q480","480p",true],["q360","360p",true]].forEach(function(t){out[t[0]]=t[2];});
+  var s = input;
+  try {
+    if (!s && typeof globalThis !== "undefined")
+      s = globalThis.SCRAPER_SETTINGS || globalThis.SETTINGS || globalThis.settings;
+    if (!s && typeof global !== "undefined")
+      s = global.SCRAPER_SETTINGS || global.SETTINGS || global.settings;
+    if (s) Object.keys(out).forEach(function(k) {
+      var v=s[k];
+      if (v && typeof v==="object") v=v.value!==undefined?v.value:v.key;
+      if (v===true || v==="true" || v==="on" || v==="yes" || v===1 || v==="1") out[k]=true;
+      else if (v===false || v==="false" || v==="off" || v==="no" || v===0 || v==="0") out[k]=false;
+    });
+  } catch(e) {}
+  return out;
+}
+function vidlinkQualityOf(stream) {
+  var q=String(stream && stream.quality || "").toLowerCase().trim();
+  var title=String(stream && stream.title || "")+" "+String(stream && stream.name || "");
+  var text=q+" "+title;
+  if (/^(2160p?|4k|uhd|8k)$/.test(q) || /(?:^|[^a-z0-9])(?:2160p?|4k|uhd|8k)(?:$|[^a-z0-9])/i.test(title)) return "q2160";
+  if (/^(1440p?|2k)$/.test(q) || /(?:^|[^a-z0-9])(?:1440p?|2k)(?:$|[^a-z0-9])/i.test(title)) return "q1440";
+  if (/^(1080p?)$/.test(q) || /(?:^|[^a-z0-9])1080p?(?:$|[^a-z0-9])/i.test(title)) return "q1080";
+  if (/^(720p?)$/.test(q) || /(?:^|[^a-z0-9])720p?(?:$|[^a-z0-9])/i.test(title)) return "q720";
+  if (/^(480p?)$/.test(q) || /(?:^|[^a-z0-9])480p?(?:$|[^a-z0-9])/i.test(title)) return "q480";
+  if (/^(360p?)$/.test(q) || /(?:^|[^a-z0-9])360p?(?:$|[^a-z0-9])/i.test(title)) return "q360";
+  return null;
+}
+function vidlinkApplyQuality(streams, settings) {
+  var enabled=vidlinkResolveQualitySettings(settings);
+  var order=["q2160","q1440","q1080","q720","q480","q360"];
+  var items=(Array.isArray(streams)?streams:[]).map(function(s,i) {
+    return {s:s,i:i,q:vidlinkQualityOf(s)};
+  }).filter(function(x){return !x.q || enabled[x.q];});
+  items.sort(function(a,b) {
+    var ai=a.q?order.indexOf(a.q):99, bi=b.q?order.indexOf(b.q):99;
+    return ai===bi?a.i-b.i:ai-bi;
+  });
+  return items.map(function(x,i) {
+    var s=Object.assign({},x.s);
+    var prefix=i<16?String.fromCodePoint(0xFE00+i):
+      (i<256?String.fromCodePoint(0xE0100+i-16):"");
+    if(prefix) {
+      if(typeof s.name==="string") s.name=prefix+s.name;
+      else if(typeof s.title==="string") s.title=prefix+s.title;
+    }
+    return s;
+  });
+}
+
+
+function getStreams(tmdbId, mediaType, season, episode, settings) {
+  return Promise.resolve(vidlinkOriginalGetStreams(tmdbId,mediaType,season,episode))
+    .then(function(streams){return vidlinkApplyQuality(streams,settings);})
+    .catch(function(e){
+      console.log("[vidlink] quality wrapper: "+(e&&e.message||e));
+      return [];
+    });
+}
+
+function onSettings(){return vidlinkQualitySettings();}
+module.exports = { getStreams, onSettings };

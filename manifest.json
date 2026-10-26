@@ -32,12 +32,12 @@
       "contentLanguage": ["en"]
     },
     {
-      "id": "vidlink",
-      "name": "VidLink",
-      "description": "VidLink.pro direct HLS via local AES-256-CBC encryption. Movies, TV, and anime (mal: ID prefix). No scraping, no external decryption service.",
+      "id": "videasy",
+      "name": "VidEasy",
+      "description": "Videasy direct HLS via local AES-256-CBC encryption. Movies, TV, and anime (mal: ID prefix). No scraping, no external decryption service.",
       "version": "1.0.0",
       "author": "Breezy9950",
-      "filename": "providers/vidlink.js",
+      "filename": "providers/videasy.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
       "formats": ["m3u8"],
